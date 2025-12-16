@@ -209,20 +209,44 @@ class TestAutomationDesktopApp {
 
         // Update check events
         ipcRenderer.on('update-check-start', () => {
-            this.showNotification('Checking for updates...', 'info');
+            this.showNotification('🔍 Đang kiểm tra cập nhật...', 'info');
         });
 
-        ipcRenderer.on('update-progress', (event, percent) => {
-            this.showNotification(`Downloading update: ${percent}%`, 'info');
+        // Update available - new version found
+        ipcRenderer.on('update-available', (event, info) => {
+            console.log('Update available:', info);
+            const version = info.version || 'mới';
+            this.showNotification(`🎉 Phiên bản ${version} đang được tải xuống...`, 'info', true);
+        });
+
+        // Update download progress
+        ipcRenderer.on('update-progress', (event, progress) => {
+            // Handle both old format (just percent) and new format (object)
+            let percent, transferred, total;
+            if (typeof progress === 'number') {
+                percent = progress;
+            } else {
+                percent = progress.percent || 0;
+                transferred = progress.transferred;
+                total = progress.total;
+            }
+            
+            const message = total 
+                ? `📥 Đang tải cập nhật: ${percent}% (${transferred}MB / ${total}MB)`
+                : `📥 Đang tải cập nhật: ${percent}%`;
+            
+            // Update notification (show persistent notification during download)
+            this.showNotification(message, 'info', true);
         });
 
         ipcRenderer.on('update-downloading', () => {
-            this.showNotification('Update is downloading...', 'info');
+            this.showNotification('📥 Đang tải xuống cập nhật...', 'info', true);
         });
 
         ipcRenderer.on('update-error', (event, error) => {
             console.error('Update error:', error);
-            this.showNotification(`Update error: ${error.message || 'Failed to check for updates'}`, 'error');
+            const message = error.message || 'Không thể kiểm tra cập nhật';
+            this.showNotification(`❌ Lỗi cập nhật: ${message}`, 'error');
         });
     }
 

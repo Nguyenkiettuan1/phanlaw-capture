@@ -196,7 +196,7 @@ function performRelease(pkg, oldVersion, newVersion) {
             try {
                 exec(releaseCmd);
                 log(`✅ GitHub Release created: v${newVersion}`, 'green');
-                log(`🔗 https://github.com/Nguyenkiettuan1/electron_desktop_app/releases/tag/v${newVersion}`, 'blue');
+                log(`🔗 https://github.com/Nguyenkiettuan1/phanlaw-capture/releases/tag/v${newVersion}`, 'blue');
                 
                 log('\n🎉 Release completed successfully!', 'green');
                 log(`\n📦 Users can now download v${newVersion}`, 'cyan');
@@ -205,7 +205,7 @@ function performRelease(pkg, oldVersion, newVersion) {
             } catch (error) {
                 log('\n❌ Failed to create GitHub Release', 'red');
                 log('You can create it manually:', 'yellow');
-                log(`  1. Go to: https://github.com/Nguyenkiettuan1/electron_desktop_app/releases/new`, 'yellow');
+                log(`  1. Go to: https://github.com/Nguyenkiettuan1/phanlaw-capture/releases/new`, 'yellow');
                 log(`  2. Tag: v${newVersion}`, 'yellow');
                 log(`  3. Upload files from dist/ folder`, 'yellow');
             }

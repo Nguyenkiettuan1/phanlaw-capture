@@ -65,8 +65,9 @@ class TestAutomationApp {
             this.mainWindow.show();
             
             // Check for updates on startup (after 3 seconds)
+            // Chỉ kiểm tra 1 lần khi mở app, không kiểm tra định kỳ
             setTimeout(() => {
-                this.checkForUpdates();
+                this.checkForUpdates(false, true); // Silent check - chỉ hiển thị dialog nếu có update
             }, 3000);
         });
 
@@ -206,29 +207,48 @@ class TestAutomationApp {
         // No need to call setFeedURL() - it will use the config from package.json
         
         // Configure auto-updater behavior
-        autoUpdater.autoDownload = false; // Don't auto-download, ask user first
-        autoUpdater.autoInstallOnAppQuit = true;
+        // Don't auto-download - ask user first
+        autoUpdater.autoDownload = false; // Ask user before downloading
+        autoUpdater.autoInstallOnAppQuit = true; // Auto-install when app quits (if downloaded)
         
-        // Set update channel (optional, for portable builds)
+        // Set update channel
         autoUpdater.channel = 'latest';
+        
+        // NOTE: Không kiểm tra định kỳ - chỉ kiểm tra khi khởi động app
 
-        // Update available
+        // Update available - ask user if they want to download
         autoUpdater.on('update-available', (info) => {
             console.log('🎉 Update available:', info.version);
             
             if (this.mainWindow) {
+                // Notify user that update is available
+                this.mainWindow.webContents.send('update-available', {
+                    version: info.version,
+                    releaseDate: info.releaseDate,
+                    releaseNotes: info.releaseNotes
+                });
+                
+                // Ask user if they want to download the update
                 const choice = dialog.showMessageBoxSync(this.mainWindow, {
                     type: 'info',
-                    buttons: ['Download Update', 'Later'],
-                    title: 'Update Available',
-                    message: `A new version (${info.version}) is available!`,
-                    detail: 'Would you like to download and install it now?',
-                    defaultId: 0
+                    buttons: ['Cập nhật ngay', 'Bỏ qua'],
+                    title: 'Có phiên bản mới',
+                    message: `Phiên bản mới (${info.version}) đã có sẵn!`,
+                    detail: 'Bạn có muốn tải xuống và cài đặt phiên bản mới không?',
+                    defaultId: 0,
+                    cancelId: 1
                 });
 
                 if (choice === 0) {
+                    // User chose to download - start downloading
+                    console.log('📥 User chose to download update');
                     autoUpdater.downloadUpdate();
                     this.mainWindow.webContents.send('update-downloading');
+                } else {
+                    // User chose to skip - keep current version
+                    console.log('⏭️ User chose to skip update - keeping current version');
+                    // Không làm gì cả - giữ nguyên phiên bản cũ
+                    // Người dùng có thể kiểm tra lại sau trong Settings nếu muốn
                 }
             }
         });
@@ -236,26 +256,22 @@ class TestAutomationApp {
         // No update available
         autoUpdater.on('update-not-available', (info) => {
             console.log('✅ App is up to date:', info.version);
-            
-            if (this.mainWindow) {
-                dialog.showMessageBoxSync(this.mainWindow, {
-                    type: 'info',
-                    buttons: ['OK'],
-                    title: 'No Updates',
-                    message: 'You are using the latest version!',
-                    detail: `Current version: ${info.version || 'Unknown'}`,
-                    defaultId: 0
-                });
-            }
+            // Don't show dialog for silent checks, only for manual checks
         });
 
         // Download progress
         autoUpdater.on('download-progress', (progress) => {
             const percent = Math.round(progress.percent);
-            console.log(`📥 Downloading update: ${percent}%`);
+            const transferred = (progress.transferred / 1024 / 1024).toFixed(2);
+            const total = (progress.total / 1024 / 1024).toFixed(2);
+            console.log(`📥 Downloading update: ${percent}% (${transferred}MB / ${total}MB)`);
             
             if (this.mainWindow) {
-                this.mainWindow.webContents.send('update-progress', percent);
+                this.mainWindow.webContents.send('update-progress', {
+                    percent: percent,
+                    transferred: transferred,
+                    total: total
+                });
             }
         });
 
@@ -264,19 +280,33 @@ class TestAutomationApp {
             console.log('✅ Update downloaded:', info.version);
             
             if (this.mainWindow) {
+                // Show notification that update is ready
                 const choice = dialog.showMessageBoxSync(this.mainWindow, {
                     type: 'info',
-                    buttons: ['Restart Now', 'Later'],
-                    title: 'Update Ready',
-                    message: 'Update has been downloaded.',
-                    detail: 'The app will restart to install the update. Restart now?',
+                    buttons: ['Khởi động lại ngay', 'Sau'],
+                    title: 'Cập nhật sẵn sàng',
+                    message: `Phiên bản ${info.version} đã được tải xuống!`,
+                    detail: 'Ứng dụng sẽ khởi động lại để cài đặt cập nhật. Bạn có muốn khởi động lại ngay bây giờ không?',
                     defaultId: 0
                 });
 
                 if (choice === 0) {
+                    // User chose to restart now
                     this.isQuitting = true;
                     autoUpdater.quitAndInstall(false, true);
+                } else {
+                    // User chose later - will install on next app quit
+                    dialog.showMessageBox(this.mainWindow, {
+                        type: 'info',
+                        buttons: ['OK'],
+                        title: 'Cập nhật sẽ được cài đặt',
+                        message: 'Cập nhật sẽ được cài đặt tự động khi bạn đóng ứng dụng.',
+                        defaultId: 0
+                    }).catch(err => console.error('Dialog error:', err));
                 }
+            } else {
+                // Window not available, install on quit
+                autoUpdater.quitAndInstall(false, true);
             }
         });
 
@@ -285,17 +315,27 @@ class TestAutomationApp {
             console.error('❌ Auto-updater error:', error);
             console.error('Error details:', error.message, error.stack);
             
+            // Don't show error dialog for network errors (user might be offline)
+            if (error.message && (
+                error.message.includes('net::ERR_INTERNET_DISCONNECTED') ||
+                error.message.includes('net::ERR_NETWORK_CHANGED') ||
+                error.message.includes('ENOTFOUND')
+            )) {
+                console.log('⚠️ Network error - will retry later');
+                return;
+            }
+            
             if (this.mainWindow) {
-                // Send error to renderer for user notification
+                // Send error to renderer for user notification (only for critical errors)
                 this.mainWindow.webContents.send('update-error', {
-                    message: error.message || 'Failed to check for updates',
+                    message: error.message || 'Không thể kiểm tra cập nhật',
                     details: error.stack
                 });
             }
         });
     }
 
-    async checkForUpdates(force = false) {
+    async checkForUpdates(force = false, silent = false) {
         try {
             // If not forced, check settings
             if (!force) {
@@ -307,10 +347,10 @@ class TestAutomationApp {
                 }
             }
 
-            console.log('🔍 Checking for updates...');
+            console.log('🔍 Checking for updates...' + (silent ? ' (silent)' : ''));
             
-            // Send notification to renderer
-            if (this.mainWindow) {
+            // Send notification to renderer (only if not silent)
+            if (this.mainWindow && !silent) {
                 this.mainWindow.webContents.send('update-check-start');
             }
             
@@ -319,14 +359,33 @@ class TestAutomationApp {
             
             console.log('✅ Update check completed:', result);
             
+            // Only show "no update" message if manually checked (not silent)
+            if (result && result.updateInfo && result.updateInfo.version && !silent) {
+                const currentVersion = require('./package.json').version;
+                if (result.updateInfo.version === currentVersion && this.mainWindow) {
+                    dialog.showMessageBox(this.mainWindow, {
+                        type: 'info',
+                        buttons: ['OK'],
+                        title: 'Không có cập nhật',
+                        message: 'Bạn đang sử dụng phiên bản mới nhất!',
+                        detail: `Phiên bản hiện tại: ${currentVersion}`,
+                        defaultId: 0
+                    }).catch(err => console.error('Dialog error:', err));
+                }
+            }
+            
             return { success: true, result: result };
             
         } catch (error) {
             console.error('❌ Update check failed:', error);
             
-            if (this.mainWindow) {
+            // Only show error if not silent and not a network error
+            if (!silent && this.mainWindow && error.message && 
+                !error.message.includes('net::ERR_INTERNET_DISCONNECTED') &&
+                !error.message.includes('net::ERR_NETWORK_CHANGED') &&
+                !error.message.includes('ENOTFOUND')) {
                 this.mainWindow.webContents.send('update-error', {
-                    message: error.message || 'Failed to check for updates',
+                    message: error.message || 'Không thể kiểm tra cập nhật',
                     details: error.stack
                 });
             }
@@ -904,10 +963,10 @@ ipcMain.handle('get-screenshots-path', async (event) => {
     }
 });
 
-// Find file in screenshots folder handler
+// Check for updates handler (manual check from UI)
 ipcMain.handle('check-for-updates', async (event, { force = false } = {}) => {
     try {
-        const result = await testApp.checkForUpdates(force);
+        const result = await testApp.checkForUpdates(force, false); // Not silent - show messages
         return result;
     } catch (error) {
         return { success: false, error: error.message };
