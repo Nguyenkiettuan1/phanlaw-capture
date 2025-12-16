@@ -88,9 +88,9 @@ async function buildExtension() {
     
     // Create extension.zip
     try {
-        const extensionZip = path.join(distDir, 'extension.zip');
-        await createZip(extensionDist, extensionZip);
-        log('✅ Extension zip created: extension.zip', '\x1b[32m');
+    const extensionZip = path.join(distDir, 'extension.zip');
+    await createZip(extensionDist, extensionZip);
+    log('✅ Extension zip created: extension.zip', '\x1b[32m');
     } catch (error) {
         log(`  ⚠️  Failed to create extension zip: ${error.message}`, '\x1b[33m');
     }
@@ -110,7 +110,7 @@ async function main() {
     // Step 1: Build with electron-packager (cách cũ)
     log('\n📝 Step 1: Building with electron-packager...', '\x1b[36m');
     try {
-        exec('npm run pack');
+    exec('npm run pack');
     } catch (error) {
         log(`❌ Build failed: ${error.message}`, '\x1b[31m');
         process.exit(1);
@@ -139,46 +139,98 @@ async function main() {
 
     log('✅ Portable app built successfully', '\x1b[32m');
 
-    // Step 3: Create latest.yml for auto-update
-    log('\n📝 Step 2: Creating update metadata...', '\x1b[36m');
+    // Step 3: Copy app-update.yml to app resources folder FIRST (before creating zip)
+    log('\n📝 Step 3: Preparing update metadata in app resources...', '\x1b[36m');
+    const resourcesDir = path.join(appDir, 'resources');
+    const appUpdateYmlPath = path.join(resourcesDir, 'app-update.yml');
     
-    const stats = fs.statSync(exePath);
-    const fileSize = stats.size;
+    // Ensure resources directory exists
+    if (!fs.existsSync(resourcesDir)) {
+        fs.mkdirSync(resourcesDir, { recursive: true });
+        log('   Created resources directory', '\x1b[37m');
+    }
+    
+    // Create a temporary latest.yml first (will be updated after zip is created)
+    // This ensures app-update.yml exists in the zip file
+    const tempYml = `version: ${version}
+releaseDate: '${new Date().toISOString()}'
+path: test-automation-screen-auto-portable-${version}.zip
+sha512: placeholder
+files:
+  - url: test-automation-screen-auto-portable-${version}.zip
+    sha512: placeholder
+    size: 0
+`;
+    
+    // Save temporary app-update.yml in resources folder
+    fs.writeFileSync(appUpdateYmlPath, tempYml);
+    log('✅ Update metadata placeholder created in app resources', '\x1b[32m');
+
+    // Step 4: Create zip file (now includes app-update.yml)
+    log('\n📝 Step 4: Creating zip file...', '\x1b[36m');
+    const zipName = `test-automation-screen-auto-portable-${version}.zip`;
+    const zipPath = path.join(distDir, zipName);
+    
+    try {
+        await createZip(appDir, zipPath);
+        log('✅ Zip file created (includes app-update.yml)', '\x1b[32m');
+    } catch (error) {
+        log(`❌ Failed to create zip: ${error.message}`, '\x1b[31m');
+        process.exit(1);
+    }
+
+    // Step 5: Calculate SHA512 and create latest.yml for auto-update
+    log('\n📝 Step 5: Creating update metadata...', '\x1b[36m');
+    
+    const crypto = require('crypto');
+    const zipStats = fs.statSync(zipPath);
+    const zipSize = zipStats.size;
+    
+    // Calculate SHA512 hash of zip file
+    log('   Calculating SHA512 hash...', '\x1b[37m');
+    const zipBuffer = fs.readFileSync(zipPath);
+    const sha512 = crypto.createHash('sha512').update(zipBuffer).digest('hex');
     
     // Create latest.yml for electron-updater
     // Note: electron-updater for portable apps needs the zip file in GitHub releases
     // Format must match electron-updater requirements
     const latestYml = `version: ${version}
 releaseDate: '${new Date().toISOString()}'
-path: test-automation-screen-auto-portable-${version}.zip
-sha512: TBD
+path: ${zipName}
+sha512: ${sha512}
 files:
-  - url: test-automation-screen-auto-portable-${version}.zip
-    sha512: TBD
-    size: ${fileSize}
+  - url: ${zipName}
+    sha512: ${sha512}
+    size: ${zipSize}
 `;
 
+    // Save latest.yml in dist folder (for GitHub release)
     fs.writeFileSync(path.join(distDir, 'latest.yml'), latestYml);
-    log('✅ Update metadata created', '\x1b[32m');
-
-    // Step 4: Create zip file
-    log('\n📝 Step 3: Creating zip file...', '\x1b[36m');
-    const zipName = `test-automation-screen-auto-portable-${version}.zip`;
-    const zipPath = path.join(distDir, zipName);
+    log('✅ Update metadata created in dist/', '\x1b[32m');
     
+    // Update app-update.yml in resources folder with correct SHA512
+    fs.writeFileSync(appUpdateYmlPath, latestYml);
+    log('✅ Update metadata updated in app resources', '\x1b[32m');
+    log(`   ${appUpdateYmlPath}`, '\x1b[37m');
+    log(`   SHA512: ${sha512.substring(0, 16)}...`, '\x1b[37m');
+    log(`   Size: ${(zipSize / 1024 / 1024).toFixed(2)} MB`, '\x1b[37m');
+    
+    // Step 6: Recreate zip file with updated app-update.yml (optional but ensures consistency)
+    log('\n📝 Step 6: Updating zip file with final metadata...', '\x1b[36m');
     try {
         await createZip(appDir, zipPath);
+        log('✅ Zip file updated with final metadata', '\x1b[32m');
     } catch (error) {
-        log(`❌ Failed to create zip: ${error.message}`, '\x1b[31m');
-        process.exit(1);
+        log(`⚠️  Failed to update zip: ${error.message} (continuing anyway)`, '\x1b[33m');
     }
 
-    // Step 5: Summary
+    // Step 6: Summary
     log('\n🎉 Build completed!', '\x1b[32m');
     log('\n📦 Files created:', '\x1b[34m');
     log(`  📁 dist/test-automation-screen-auto-win32-x64/  (portable folder)`, '\x1b[37m');
-    log(`  📦 dist/${zipName}  (zip file)`, '\x1b[37m');
-    log(`  📄 dist/latest.yml  (update metadata)`, '\x1b[37m');
+    log(`  📦 dist/${zipName}  (zip file - ${(zipSize / 1024 / 1024).toFixed(2)} MB)`, '\x1b[37m');
+    log(`  📄 dist/latest.yml  (update metadata for GitHub)`, '\x1b[37m');
+    log(`  📄 dist/test-automation-screen-auto-win32-x64/resources/app-update.yml  (update metadata in app)`, '\x1b[37m');
 
     log('\n🚀 Ready to upload to GitHub:', '\x1b[36m');
     log(`  1. Create release: gh release create v${version}`, '\x1b[37m');

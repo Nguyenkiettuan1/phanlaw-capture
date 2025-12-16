@@ -80,6 +80,26 @@
                   </div>
                   <div class="form-group">
                     <label for="sport">Sport</label>
+                    <div
+                      id="sport-week-info"
+                      class="sport-week-info"
+                      style="
+                        display: none;
+                        margin-top: 5px;
+                        font-size: 12px;
+                        color: #6c757d;
+                        font-style: italic;
+                      "
+                    >
+                      📅 Đang hiển thị sports từ
+                      <span id="sport-week-start" style="font-weight: bold"
+                        >...</span
+                      >
+                      đến
+                      <span id="sport-week-end" style="font-weight: bold"
+                        >...</span
+                      >
+                    </div>
                     <div class="sport-container">
                       <input
                         type="text"
@@ -124,28 +144,102 @@
                   </div>
                   <div class="form-row">
                     <div class="form-group">
-                      <label for="sport-start-time">Start Time (Từ)</label>
-                      <input
-                        type="text"
-                        id="sport-start-time"
-                        class="form-control"
-                        placeholder="YYYY-MM-DD HH:MM"
-                      />
-                    </div>
-                    <div class="form-group">
-                      <label for="sport-end-time">End Time (Đến)</label>
-                      <input
-                        type="text"
-                        id="sport-end-time"
-                        class="form-control"
-                        placeholder="YYYY-MM-DD HH:MM"
-                      />
+                      <label for="sport-start-time"
+                        >Start Time (Từ) - Lọc chính xác ngày giờ</label
+                      >
+                      <div
+                        style="
+                          display: flex;
+                          gap: 8px;
+                          align-items: center;
+                          flex-wrap: wrap;
+                        "
+                      >
+                        <input
+                          type="date"
+                          id="sport-start-time-date"
+                          class="form-control"
+                          style="flex: 1; min-width: 150px"
+                        />
+                        <div
+                          style="display: flex; gap: 4px; align-items: center"
+                        >
+                          <input
+                            type="number"
+                            id="sport-start-time-hour"
+                            class="form-control"
+                            min="0"
+                            max="23"
+                            placeholder="HH"
+                            style="
+                              width: 75px;
+                              text-align: center;
+                              font-size: 14px;
+                              padding: 8px 4px;
+                            "
+                          />
+                          <span style="font-weight: bold; font-size: 16px"
+                            >:</span
+                          >
+                          <input
+                            type="number"
+                            id="sport-start-time-minute"
+                            class="form-control"
+                            min="0"
+                            max="59"
+                            placeholder="MM"
+                            style="
+                              width: 75px;
+                              text-align: center;
+                              font-size: 14px;
+                              padding: 8px 4px;
+                            "
+                          />
+                        </div>
+                      </div>
+                      <small class="form-help">
+                        💡 Chọn ngày giờ từ lịch (tùy chọn, format 24 giờ: 00:00
+                        - 23:59). Sports sẽ tự động load theo tuần hiện tại (Thứ
+                        2 - Chủ nhật)
+                      </small>
                     </div>
                   </div>
                   <small class="form-help"
                     >💡 These filters will be applied when you click on the
                     Sport field to load options</small
                   >
+                </div>
+
+                <!-- Platform Selection (Social Media) -->
+                <div
+                  class="form-group"
+                  style="margin-top: 20px; margin-bottom: 20px"
+                >
+                  <label
+                    style="
+                      display: block;
+                      margin-bottom: 10px;
+                      font-weight: bold;
+                    "
+                  >
+                    🌐 Social Media Platform <span style="color: red">*</span>
+                  </label>
+                  <div
+                    id="social-media-radio-container"
+                    style="display: flex; flex-direction: column; gap: 10px"
+                  >
+                    <!-- Radio buttons will be dynamically loaded here -->
+                    <div style="color: #6c757d; font-size: 14px">
+                      Loading platforms...
+                    </div>
+                  </div>
+                  <small
+                    class="form-help"
+                    style="display: block; margin-top: 5px"
+                  >
+                    💡 Please select a social media platform before starting the
+                    session
+                  </small>
                 </div>
 
                 <button id="start-session-btn" class="btn btn-success">
@@ -203,7 +297,9 @@
                       type="text"
                       id="bucket-name"
                       class="form-control"
-                      placeholder="e.g., b1, b1/b2, match_20241201"
+                      placeholder="Auto-generated from region, date, and sport"
+                      readonly
+                      style="background-color: #f8f9fa; cursor: not-allowed"
                     />
                     <small class="form-help">
                       💡 <strong>Hướng dẫn:</strong><br />
@@ -297,6 +393,33 @@
                     >
                       <div id="popup-signal-options"></div>
                     </div>
+                  </div>
+
+                  <!-- View Field (only for Facebook platform) -->
+                  <div
+                    id="popup-view-section"
+                    class="popup-view-section hidden"
+                    style="margin-top: 15px"
+                  >
+                    <label for="popup-view"
+                      >👁️ View <span style="color: red">*</span>:</label
+                    >
+                    <input
+                      type="number"
+                      id="popup-view"
+                      class="form-control"
+                      placeholder="Enter view number (positive integer)..."
+                      autocomplete="off"
+                      min="1"
+                      step="1"
+                    />
+                    <small
+                      class="form-help"
+                      style="display: block; margin-top: 5px"
+                    >
+                      💡 Required field for Facebook platform. Must be a
+                      positive number.
+                    </small>
                   </div>
 
                   <!-- Create New Signal Section -->
@@ -510,6 +633,15 @@
                   <input type="checkbox" id="check-updates-checkbox" />
                   Check for updates on startup
                 </label>
+              </div>
+              <div class="settings-item">
+                <button
+                  id="check-updates-btn"
+                  class="btn btn-primary"
+                  style="width: 100%; margin-top: 10px"
+                >
+                  🔄 Check for Updates Now
+                </button>
               </div>
               <div class="settings-item">
                 <label for="notification-duration"

@@ -42,6 +42,12 @@ class SettingsUIHandler {
             });
         });
 
+        // Check for updates button
+        const checkUpdatesBtn = document.getElementById('check-updates-btn');
+        if (checkUpdatesBtn) {
+            checkUpdatesBtn.addEventListener('click', () => this.checkForUpdates());
+        }
+
         // Keyboard event for recording
         document.addEventListener('keydown', (e) => this.handleKeyDown(e));
     }
@@ -214,6 +220,59 @@ class SettingsUIHandler {
 
         // Return as-is for other keys
         return key;
+    }
+
+    async checkForUpdates() {
+        const btn = document.getElementById('check-updates-btn');
+        if (!btn) return;
+        
+        // Disable button and show loading state
+        btn.disabled = true;
+        const originalText = btn.textContent;
+        btn.textContent = '🔄 Checking...';
+        
+        try {
+            const result = await ipcRenderer.invoke('check-for-updates', { force: true });
+            
+            if (result.success) {
+                this.showNotification('Checking for updates...', 'info');
+                // The update dialog will be shown by main.js when update is found
+            } else {
+                this.showNotification(result.message || result.error || 'Failed to check for updates', 'error');
+            }
+        } catch (error) {
+            console.error('Failed to check for updates:', error);
+            this.showNotification('Failed to check for updates: ' + error.message, 'error');
+        } finally {
+            // Re-enable button after 2 seconds
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }, 2000);
+        }
+    }
+
+    showNotification(message, type = 'info') {
+        // Simple notification - you can enhance this later
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        notification.textContent = message;
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            background: ${type === 'error' ? '#f44336' : type === 'success' ? '#4caf50' : '#2196f3'};
+            color: white;
+            border-radius: 5px;
+            z-index: 10000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        `;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, 3000);
     }
 
     async resetShortcut(shortcutName) {

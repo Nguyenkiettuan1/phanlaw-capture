@@ -19,6 +19,12 @@ class ApiService {
         this.currentUser = null;
     }
 
+    clearCache() {
+        // Clear any URL check cache if implemented in the future
+        // Currently no cache is implemented, but this method is here for future use
+        console.log('🧹 Cache cleared (no cache currently implemented)');
+    }
+
     async login(credentials) {
         try {
             const formData = new URLSearchParams();
@@ -182,20 +188,43 @@ class ApiService {
         }
     }
 
-    async createDetectedLink(url, sportId, signalId, assignedUserId) {
+    async createDetectedLink(url, sportId, signalId, assignedUserId, socialMediaTypeId = null, view = null) {
         try {
-            console.log(' Creating detected link:', { url, sportId, signalId, assignedUserId });
-            const response = await axios.post(`${this.apiBaseUrl}/detected_links`, {
+            console.log('🔗 Creating detected link:', { url, sportId, signalId, assignedUserId, socialMediaTypeId, view });
+            
+            // Build request body
+            const requestBody = {
                 url: url,
                 sport_id: sportId,
                 signal_id: signalId,
                 assigned_user_id: assignedUserId
-            }, {
+            };
+            
+            // Add social_media_type_id if provided
+            if (socialMediaTypeId) {
+                requestBody.social_media_type_id = socialMediaTypeId;
+            }
+            
+            // Add view if provided (must be integer)
+            if (view !== null && view !== undefined) {
+                const viewInt = parseInt(view, 10);
+                if (!isNaN(viewInt) && viewInt > 0) {
+                    requestBody.view = viewInt;
+                } else {
+                    console.warn('⚠️ Invalid view value, skipping:', view);
+                }
+            }
+            
+            console.log('📤 Request body:', requestBody);
+            
+            const response = await axios.post(`${this.apiBaseUrl}/detected_links`, requestBody, {
                 headers: {
                     'Authorization': `Bearer ${this.accessToken}`,
                     'Content-Type': 'application/json'
                 }
             });
+            
+            console.log('✅ Detected link created:', response.data);
             return { success: true, data: response.data };
         } catch (error) {
             console.error('❌ Error creating detected link:', error.response?.data || error.message);
@@ -252,6 +281,36 @@ class ApiService {
                 success: false, 
                 error: error.response?.data?.detail || error.message 
             };
+        }
+    }
+
+    async getSocialMedia(searchQuery = '', page = 1, pageSize = 10, type = null) {
+        try {
+            // Build query params
+            let queryParams = `page=${page}&page_size=${pageSize}&order_by=type&order_desc=false`;
+            
+            // Add search params if provided (search by type)
+            if (searchQuery && searchQuery.trim()) {
+                const search = encodeURIComponent(searchQuery.trim());
+                queryParams += `&type=${search}`;
+            }
+            
+            // Add type filter if provided
+            if (type) {
+                queryParams += `&type=${encodeURIComponent(type)}`;
+            }
+            
+            console.log('📱 Fetching social media with params:', queryParams);
+            const response = await axios.get(`${this.apiBaseUrl}/social_media/?${queryParams}`, {
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Accept': 'application/json'
+                }
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            console.error('❌ Error fetching social media:', error.response?.data || error.message);
+            return { success: false, error: error.message };
         }
     }
 }

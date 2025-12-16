@@ -775,6 +775,12 @@ body {
     word-wrap: break-word; /* Break long words */
 }
 
+/* Notification from queue (success) appears on left side */
+.notification.from-queue {
+    right: auto;
+    left: 20px;
+}
+
 .notification-content {
     display: flex;
     align-items: flex-start;
@@ -1617,6 +1623,39 @@ body {
   outline: none;
   border-color: #667eea;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+/* Highlight selected fields when session is active */
+.form-control.session-active {
+  background: #e8f5e9;
+  border-color: #27ae60;
+  border-width: 3px;
+  font-weight: 600;
+  color: #155724;
+  box-shadow: 0 0 0 3px rgba(39, 174, 96, 0.2);
+}
+
+.form-group.session-active label {
+  font-weight: 700;
+  color: #27ae60;
+}
+
+/* Highlight selected social media radio button */
+input[name="social-media-platform"]:checked + span {
+  font-weight: 700;
+  color: #27ae60;
+}
+
+input[name="social-media-platform"]:checked {
+  accent-color: #27ae60;
+}
+
+label:has(input[name="social-media-platform"]:checked) {
+  background: #e8f5e9 !important;
+  border: 2px solid #27ae60;
+  border-radius: 6px;
+  padding: 8px;
+  font-weight: 600;
 }
 
 .btn {

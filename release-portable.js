@@ -145,6 +145,8 @@ function performRelease(pkg, oldVersion, newVersion) {
         log('\n📝 Step 4: Verifying files...', 'cyan');
         const zipFile = `dist/test-automation-screen-auto-portable-${newVersion}.zip`;
         const ymlFile = 'dist/latest.yml';
+        const appDir = `dist/test-automation-screen-auto-win32-x64`;
+        const appUpdateYmlFile = path.join(appDir, 'resources', 'app-update.yml');
         
         if (!fs.existsSync(zipFile)) {
             log(`❌ Zip file not found: ${zipFile}`, 'red');
@@ -154,6 +156,13 @@ function performRelease(pkg, oldVersion, newVersion) {
         if (!fs.existsSync(ymlFile)) {
             log(`❌ Update file not found: ${ymlFile}`, 'red');
             process.exit(1);
+        }
+        
+        if (!fs.existsSync(appUpdateYmlFile)) {
+            log(`⚠️  app-update.yml not found in app resources: ${appUpdateYmlFile}`, 'yellow');
+            log('   This file should be included in the zip for auto-update to work', 'yellow');
+        } else {
+            log('✅ app-update.yml found in app resources', 'green');
         }
         
         const zipStats = fs.statSync(zipFile);

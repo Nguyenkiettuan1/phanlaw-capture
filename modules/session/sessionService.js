@@ -13,15 +13,33 @@ class SessionService {
         return this.currentUser;
     }
 
-    startSession(regionId, sportId, sportName) {
+    startSession(regionId, sportId, sportName, socialMediaTypeId, socialMediaType) {
         try {
             // Lock UI state (no API call needed)
-            this.currentSession = { regionId, sportId, sportName };
+            this.currentSession = { 
+                regionId, 
+                sportId, 
+                sportName, 
+                socialMediaTypeId,
+                socialMediaType // Store type to check if it's facebook
+            };
             
-            // Disable region and sport selects
+            // Disable region, sport, and social media radio buttons
             document.getElementById('region').disabled = true;
             document.getElementById('sport').disabled = true;
             document.getElementById('start-session-btn').disabled = true;
+            
+            // Disable all social media radio buttons
+            const socialMediaRadios = document.querySelectorAll('input[name="social-media-platform"]');
+            socialMediaRadios.forEach(radio => {
+                radio.disabled = true;
+            });
+            
+            // Disable bucket name input
+            const bucketInput = document.getElementById('bucket-name');
+            if (bucketInput) {
+                bucketInput.disabled = true;
+            }
             
             // Show stop session button
             document.getElementById('stop-session-btn').classList.remove('hidden');
@@ -37,10 +55,22 @@ class SessionService {
             // Reset session data
             this.currentSession = null;
             
-            // Enable region and sport selects
+            // Enable region, sport, and social media radio buttons
             document.getElementById('region').disabled = false;
             document.getElementById('sport').disabled = false;
             document.getElementById('start-session-btn').disabled = false;
+            
+            // Enable all social media radio buttons
+            const socialMediaRadios = document.querySelectorAll('input[name="social-media-platform"]');
+            socialMediaRadios.forEach(radio => {
+                radio.disabled = false;
+            });
+            
+            // Enable bucket name input (though it's readonly)
+            const bucketInput = document.getElementById('bucket-name');
+            if (bucketInput) {
+                bucketInput.disabled = false;
+            }
             
             // Hide stop session button
             document.getElementById('stop-session-btn').classList.add('hidden');
@@ -71,8 +101,23 @@ class SessionService {
             regionId: this.currentSession.regionId,
             sportId: this.currentSession.sportId,
             sportName: this.currentSession.sportName,
+            socialMediaTypeId: this.currentSession.socialMediaTypeId,
+            socialMediaType: this.currentSession.socialMediaType,
             userId: this.currentUser?.id
         };
+    }
+
+    getPlatform() {
+        // Return type for backward compatibility (check if it's facebook)
+        return this.currentSession?.socialMediaType?.toLowerCase() === 'facebook' ? 'facebook' : null;
+    }
+
+    getSocialMediaTypeId() {
+        return this.currentSession?.socialMediaTypeId || null;
+    }
+
+    getSocialMediaType() {
+        return this.currentSession?.socialMediaType || null;
     }
 
     resetSession() {
@@ -84,6 +129,13 @@ class SessionService {
         document.getElementById('sport').disabled = false;
         document.getElementById('start-session-btn').disabled = false;
         document.getElementById('stop-session-btn').classList.add('hidden');
+        
+        // Enable social media radio buttons
+        const socialMediaRadios = document.querySelectorAll('input[name="social-media-platform"]');
+        socialMediaRadios.forEach(radio => {
+            radio.disabled = false;
+            radio.checked = false;
+        });
         
         // Clear form fields
         document.getElementById('region').value = '';

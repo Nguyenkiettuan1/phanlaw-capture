@@ -6,6 +6,7 @@ const config = require('./app.config');
 const UiService = require('./modules/ui/uiService');
 const SessionService = require('./modules/session/sessionService');
 const SettingsUIHandler = require('./modules/settings/settingsUIHandler');
+const ApiService = require('./modules/api/apiService');
 
 class TestAutomationDesktopApp {
     constructor() {
@@ -22,6 +23,10 @@ class TestAutomationDesktopApp {
         this.uiService = new UiService();
         this.sessionService = new SessionService();
         this.settingsUIHandler = new SettingsUIHandler();
+        this.apiService = new ApiService();
+        
+        // Link session service to UI service
+        this.uiService.setSessionService(this.sessionService);
         
         this.init();
     }
@@ -88,6 +93,8 @@ class TestAutomationDesktopApp {
         this.setupSingleInputHandlers('region', 'regions', 'region_name', this.loadRegions.bind(this));
         this.setupSingleInputHandlers('sport', 'sports', 'league', this.loadSports.bind(this));
         this.setupSingleInputHandlers('signal', 'signals', 'signal_name', this.loadSignals.bind(this));
+        
+        // Don't load social media platforms here - wait for login
         
         // Popup signal (same logic as main signal)
         this.setupSingleInputHandlers('popup-signal', 'signals', 'signal_name', this.loadPopupSignals.bind(this));
@@ -199,6 +206,24 @@ class TestAutomationDesktopApp {
                 this.settingsUIHandler.openSettings();
             }
         });
+
+        // Update check events
+        ipcRenderer.on('update-check-start', () => {
+            this.showNotification('Checking for updates...', 'info');
+        });
+
+        ipcRenderer.on('update-progress', (event, percent) => {
+            this.showNotification(`Downloading update: ${percent}%`, 'info');
+        });
+
+        ipcRenderer.on('update-downloading', () => {
+            this.showNotification('Update is downloading...', 'info');
+        });
+
+        ipcRenderer.on('update-error', (event, error) => {
+            console.error('Update error:', error);
+            this.showNotification(`Update error: ${error.message || 'Failed to check for updates'}`, 'error');
+        });
     }
 
     setupWindowControls() {
@@ -239,6 +264,23 @@ class TestAutomationDesktopApp {
         let currentQuery = '';
         let selectedIndex = -1;
         let currentRegionId = null;
+        let debounceTimeout = null; // For debouncing sport search
+        
+        // For sport, sync hasMoreData with instance variable
+        if (inputId === 'sport') {
+            // Initialize hasMoreSports if not exists
+            if (this.hasMoreSports === undefined) {
+                this.hasMoreSports = true;
+            }
+        }
+        
+        // For social-media, sync hasMoreData with instance variable
+        if (inputId === 'social-media') {
+            // Initialize hasMoreSocialMedia if not exists
+            if (this.hasMoreSocialMedia === undefined) {
+                this.hasMoreSocialMedia = true;
+            }
+        }
         
         // DON'T load initial data here - wait for user interaction
         
@@ -263,7 +305,7 @@ class TestAutomationDesktopApp {
             dropdown.classList.remove('hidden');
         });
         
-        // Input typing - search
+        // Input typing - search with debounce for sport
         input.addEventListener('input', (e) => {
             const query = e.target.value.trim();
             currentQuery = query;
@@ -271,22 +313,40 @@ class TestAutomationDesktopApp {
             hasMoreData = true;
             selectedIndex = -1;
             
-            if (query.length >= 2) {
-                dropdown.classList.remove('hidden');
-                if (inputId === 'sport' && currentRegionId) {
-                    loadFunction(currentRegionId, 1, query, true);
-                } else {
-                    loadFunction(1, query, true);
-                }
-            } else if (query.length === 0) {
-                if (inputId === 'sport' && currentRegionId) {
-                    loadFunction(currentRegionId, 1, '', true);
-                } else {
-                    loadFunction(1, '', true);
-                }
-            } else {
-                dropdown.classList.add('hidden');
+            // Reset hasMoreSports for sport
+            if (inputId === 'sport') {
+                this.hasMoreSports = true;
             }
+            
+            // Reset hasMoreSocialMedia for social-media
+            if (inputId === 'social-media') {
+                this.hasMoreSocialMedia = true;
+            }
+            
+            // Clear previous debounce timeout
+            if (debounceTimeout) {
+                clearTimeout(debounceTimeout);
+            }
+            
+            // For sport, add debounce (300ms) to avoid too many API calls
+            const debounceDelay = inputId === 'sport' ? 300 : 0;
+            
+            debounceTimeout = setTimeout(() => {
+                if (query.length >= 1) {
+                    dropdown.classList.remove('hidden');
+                    if (inputId === 'sport' && currentRegionId) {
+                        loadFunction(currentRegionId, 1, query, true);
+                    } else {
+                        loadFunction(1, query, true);
+                    }
+                } else if (query.length === 0) {
+                    if (inputId === 'sport' && currentRegionId) {
+                        loadFunction(currentRegionId, 1, '', true);
+                    } else {
+                        loadFunction(1, '', true);
+                    }
+                }
+            }, debounceDelay);
         });
         
         // Keyboard navigation
@@ -319,20 +379,37 @@ class TestAutomationDesktopApp {
             }
         });
         
+        const self = this; // Store reference to 'this' for use in closure
+        
         // Infinite scroll on dropdown
         dropdown.addEventListener('scroll', () => {
             const scrollTop = dropdown.scrollTop;
             const scrollHeight = dropdown.scrollHeight;
             const clientHeight = dropdown.clientHeight;
             
+            // Check if we can load more - for sport and social-media, also check instance variable
+            let canLoadMore = hasMoreData;
+            if (inputId === 'sport') {
+                canLoadMore = hasMoreData && (self.hasMoreSports !== false);
+            } else if (inputId === 'social-media') {
+                canLoadMore = hasMoreData && (self.hasMoreSocialMedia !== false);
+            }
+            
             // Trigger when scrolled to 80%
-            if (scrollTop + clientHeight >= scrollHeight * 0.8 && !isLoading && hasMoreData) {
+            if (scrollTop + clientHeight >= scrollHeight * 0.8 && !isLoading && canLoadMore) {
                 loadMoreData();
             }
         });
-        
         async function loadMoreData() {
-            if (isLoading || !hasMoreData) return;
+            // Check hasMoreData - for sport and social-media, also check instance variable
+            let canLoadMore = hasMoreData;
+            if (inputId === 'sport') {
+                canLoadMore = hasMoreData && (self.hasMoreSports !== false);
+            } else if (inputId === 'social-media') {
+                canLoadMore = hasMoreData && (self.hasMoreSocialMedia !== false);
+            }
+                
+            if (isLoading || !canLoadMore) return;
             
             isLoading = true;
             currentPage++;
@@ -342,6 +419,13 @@ class TestAutomationDesktopApp {
                     await loadFunction(currentRegionId, currentPage, currentQuery, false);
                 } else {
                     await loadFunction(currentPage, currentQuery, false);
+                }
+                
+                // Update hasMoreData based on instance variable for sport and social-media
+                if (inputId === 'sport') {
+                    hasMoreData = self.hasMoreSports !== false;
+                } else if (inputId === 'social-media') {
+                    hasMoreData = self.hasMoreSocialMedia !== false;
                 }
             } catch (error) {
                 console.error(`Error loading more ${inputId}:`, error);
@@ -361,12 +445,23 @@ class TestAutomationDesktopApp {
                 hasMoreData = true;
                 currentQuery = '';
                 
+                // Reset hasMoreSports when region changes
+                this.hasMoreSports = true;
+                
                 if (currentRegionId) {
                     loadFunction(currentRegionId, 1, '', true);
                 } else {
                     optionsContainer.innerHTML = '';
                 }
             });
+        }
+        
+        // Special handling for social-media - track pagination
+        if (inputId === 'social-media') {
+            // Initialize hasMoreSocialMedia if not exists
+            if (this.hasMoreSocialMedia === undefined) {
+                this.hasMoreSocialMedia = true;
+            }
         }
     }
 
@@ -408,6 +503,13 @@ class TestAutomationDesktopApp {
         input.value = text;
         input.dataset.value = value;
         
+        // Store type for social media (to check if it's facebook)
+        if (inputId === 'social-media') {
+            const type = option.dataset.type || '';
+            input.dataset.type = type;
+            console.log('📱 Selected social media:', { id: value, type: type, text: text });
+        }
+        
         // Parse and store sport data when sport is selected
         if (inputId === 'sport') {
             this.parseAndStoreSportData(text);
@@ -434,7 +536,6 @@ class TestAutomationDesktopApp {
         const leagueInput = document.getElementById('sport-league');
         const matchNameInput = document.getElementById('sport-match-name');
         const startTimeInput = document.getElementById('sport-start-time');
-        const endTimeInput = document.getElementById('sport-end-time');
         
         const reloadSports = () => {
             const regionInput = document.getElementById('region');
@@ -447,7 +548,7 @@ class TestAutomationDesktopApp {
         };
         
         // Add event listeners for ENTER key and BLUR (click outside)
-        const filterInputs = [leagueInput, matchNameInput, startTimeInput, endTimeInput];
+        const filterInputs = [leagueInput, matchNameInput];
         
         filterInputs.forEach(input => {
             if (input) {
@@ -464,6 +565,214 @@ class TestAutomationDesktopApp {
                 });
             }
         });
+        
+        // For start time inputs (date + hour + minute), reload on change
+        const startTimeDateInput = document.getElementById('sport-start-time-date');
+        const startTimeHourInput = document.getElementById('sport-start-time-hour');
+        const startTimeMinuteInput = document.getElementById('sport-start-time-minute');
+        
+        // Function to validate and format time inputs
+        const validateTimeInput = (input, max) => {
+            const value = parseInt(input.value, 10);
+            if (isNaN(value) || value < 0) {
+                input.value = '';
+            } else if (value > max) {
+                input.value = max;
+            } else {
+                // Pad with zero if needed
+                input.value = String(value).padStart(2, '0');
+            }
+        };
+        
+        if (startTimeDateInput) {
+            startTimeDateInput.addEventListener('change', () => {
+                const dateValue = startTimeDateInput.value;
+                if (dateValue) {
+                    // Auto-set hour and minute to 00:00 when date is selected
+                    if (startTimeHourInput && !startTimeHourInput.value) {
+                        startTimeHourInput.value = '00';
+                    }
+                    if (startTimeMinuteInput && !startTimeMinuteInput.value) {
+                        startTimeMinuteInput.value = '00';
+                    }
+                } else {
+                    // Clear hour and minute when date is cleared
+                    if (startTimeHourInput) {
+                        startTimeHourInput.value = '';
+                    }
+                    if (startTimeMinuteInput) {
+                        startTimeMinuteInput.value = '';
+                    }
+                }
+                // Update visibility immediately
+                this.updateSportWeekInfoVisibility();
+                reloadSports();
+            });
+            // Also handle input event for immediate feedback when typing/clearing
+            startTimeDateInput.addEventListener('input', () => {
+                const dateValue = startTimeDateInput.value;
+                if (!dateValue) {
+                    // Clear hour and minute when date is cleared
+                    if (startTimeHourInput) {
+                        startTimeHourInput.value = '';
+                    }
+                    if (startTimeMinuteInput) {
+                        startTimeMinuteInput.value = '';
+                    }
+                }
+                this.updateSportWeekInfoVisibility();
+            });
+        }
+        
+        if (startTimeHourInput) {
+            startTimeHourInput.addEventListener('input', (e) => {
+                validateTimeInput(e.target, 23);
+                // Update visibility immediately
+                this.updateSportWeekInfoVisibility();
+            });
+            startTimeHourInput.addEventListener('blur', (e) => {
+                validateTimeInput(e.target, 23);
+                if (e.target.value) {
+                    e.target.value = String(parseInt(e.target.value, 10)).padStart(2, '0');
+                }
+                // Update visibility immediately
+                this.updateSportWeekInfoVisibility();
+                reloadSports();
+            });
+        }
+        
+        if (startTimeMinuteInput) {
+            startTimeMinuteInput.addEventListener('input', (e) => {
+                validateTimeInput(e.target, 59);
+                // Update visibility immediately
+                this.updateSportWeekInfoVisibility();
+            });
+            startTimeMinuteInput.addEventListener('blur', (e) => {
+                validateTimeInput(e.target, 59);
+                if (e.target.value) {
+                    e.target.value = String(parseInt(e.target.value, 10)).padStart(2, '0');
+                }
+                // Update visibility immediately
+                this.updateSportWeekInfoVisibility();
+                reloadSports();
+            });
+        }
+    }
+
+    // Calculate week range (Monday to Sunday) for a given date
+    getWeekRange(date = new Date()) {
+        // Get day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
+        const dayOfWeek = date.getDay();
+        
+        // Calculate days to Monday (if Sunday, go back 6 days; otherwise go back dayOfWeek - 1 days)
+        const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        
+        // Calculate Monday of the week
+        const monday = new Date(date);
+        monday.setDate(date.getDate() - daysToMonday);
+        monday.setHours(0, 0, 0, 0);
+        
+        // Calculate Sunday of the week (6 days after Monday)
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        sunday.setHours(23, 59, 59, 999);
+        
+        return {
+            monday: monday,
+            sunday: sunday
+        };
+    }
+
+    // Format date to yyyy-mm-dd HH:MM format
+    formatDateTime(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day} ${hours}:${minutes}`;
+    }
+
+    // Format date to DD/MM/YYYY for display
+    formatDateDisplay(date) {
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}/${month}/${year}`;
+    }
+
+    // Update sport week info display
+    updateSportWeekInfo(monday, sunday) {
+        const weekInfoEl = document.getElementById('sport-week-info');
+        const weekStartEl = document.getElementById('sport-week-start');
+        const weekEndEl = document.getElementById('sport-week-end');
+        
+        if (weekInfoEl && weekStartEl && weekEndEl) {
+            weekStartEl.textContent = this.formatDateDisplay(monday);
+            weekEndEl.textContent = this.formatDateDisplay(sunday);
+            weekInfoEl.style.display = 'block';
+        }
+    }
+
+    updateSportWeekInfoVisibility() {
+        // Check if start-time filter has any value
+        const startTimeDateInput = document.getElementById('sport-start-time-date');
+        const startTimeHourInput = document.getElementById('sport-start-time-hour');
+        const startTimeMinuteInput = document.getElementById('sport-start-time-minute');
+        
+        const hasDate = startTimeDateInput?.value;
+        const hasHour = startTimeHourInput?.value;
+        const hasMinute = startTimeMinuteInput?.value;
+        const hasFilter = hasDate || hasHour || hasMinute;
+        
+        const weekInfoEl = document.getElementById('sport-week-info');
+        if (weekInfoEl) {
+            if (hasFilter) {
+                // Hide when filter is applied
+                weekInfoEl.style.display = 'none';
+            } else {
+                // Show week info when no filter - calculate current week
+                const weekRange = this.getWeekRange();
+                this.updateSportWeekInfo(weekRange.monday, weekRange.sunday);
+            }
+        }
+    }
+
+    // Convert DD/MM/YYYY HH:MM to yyyy-mm-dd HH:MM format (24-hour format only)
+    convertDateFormat(inputValue) {
+        if (!inputValue || !inputValue.trim()) {
+            return null;
+        }
+        
+        // Try to parse DD/MM/YYYY HH:MM format (24-hour: 00:00 - 23:59)
+        // Example: 14/11/2025 23:30
+        const pattern = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/;
+        const match = inputValue.trim().match(pattern);
+        
+        if (match) {
+            const day = match[1].padStart(2, '0');
+            const month = match[2].padStart(2, '0');
+            const year = match[3];
+            const hours = parseInt(match[4], 10);
+            const minutes = parseInt(match[5], 10);
+            
+            // Validate hours (00-23) and minutes (00-59)
+            if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+                return null; // Invalid time
+            }
+            
+            const hoursStr = String(hours).padStart(2, '0');
+            const minutesStr = String(minutes).padStart(2, '0');
+            
+            // Validate date
+            const date = new Date(`${year}-${month}-${day}T${hoursStr}:${minutesStr}`);
+            if (date.getDate() == parseInt(day, 10) && date.getMonth() + 1 == parseInt(month, 10) && date.getFullYear() == parseInt(year, 10)) {
+                return `${year}-${month}-${day} ${hoursStr}:${minutesStr}`;
+            }
+        }
+        
+        // If format doesn't match, return null (invalid format)
+        return null;
     }
 
     setupDropdownInfiniteScroll(dropdownId, apiEndpoint, searchParam, loadFunction) {
@@ -648,6 +957,9 @@ class TestAutomationDesktopApp {
                 // Set user in session service
                 this.sessionService.setCurrentUser(userData);
                 
+                // Set access token for apiService in renderer
+                this.apiService.setAccessToken(this.accessToken, userData);
+                
                 // Set access token and user info in main process
                 await ipcRenderer.invoke('set-access-token', { 
                     token: this.accessToken, 
@@ -662,6 +974,8 @@ class TestAutomationDesktopApp {
                 setTimeout(() => {
                     this.showMainInterface(userData);
                     this.showNotification('Login successful!', 'success');
+                    // Load social media platforms after login
+                    this.loadSocialMediaRadioButtons();
                 }, 500);
             } else {
                 throw new Error('Failed to get user info');
@@ -868,10 +1182,6 @@ class TestAutomationDesktopApp {
 
     async loadSports(regionId, page = 1, query = '', isNewSearch = true) {
         try {
-            if (isNewSearch) {
-            this.showLoading('Loading sports...');
-            }
-            
             const params = new URLSearchParams({
                 page: page.toString(),
                 page_size: '10'
@@ -884,8 +1194,70 @@ class TestAutomationDesktopApp {
             // Get filter values from inputs
             const leagueFilter = document.getElementById('sport-league')?.value.trim();
             const matchNameFilter = document.getElementById('sport-match-name')?.value.trim();
-            const startTimeFilter = document.getElementById('sport-start-time')?.value;
-            const endTimeFilter = document.getElementById('sport-end-time')?.value;
+            const startTimeDateInput = document.getElementById('sport-start-time-date');
+            const startTimeHourInput = document.getElementById('sport-start-time-hour');
+            const startTimeMinuteInput = document.getElementById('sport-start-time-minute');
+            
+            // Combine date and time inputs to yyyy-mm-dd HH:mm format (24-hour only)
+            let startTimeFilterValue = null;
+            const dateValue = startTimeDateInput?.value; // yyyy-mm-dd format
+            const hourValue = startTimeHourInput?.value ? String(parseInt(startTimeHourInput.value, 10)).padStart(2, '0') : null;
+            const minuteValue = startTimeMinuteInput?.value ? String(parseInt(startTimeMinuteInput.value, 10)).padStart(2, '0') : null;
+            
+            if (dateValue) {
+                if (hourValue !== null && minuteValue !== null) {
+                    // Date + hour + minute all provided
+                    startTimeFilterValue = `${dateValue} ${hourValue}:${minuteValue}`;
+                } else if (hourValue !== null) {
+                    // Date + hour only, use 00 for minutes
+                    startTimeFilterValue = `${dateValue} ${hourValue}:00`;
+                } else if (minuteValue !== null) {
+                    // Date + minute only, use 00 for hours
+                    startTimeFilterValue = `${dateValue} 00:${minuteValue}`;
+                } else {
+                    // Only date, use 00:00 as default time
+                    startTimeFilterValue = `${dateValue} 00:00`;
+                }
+            } else if (hourValue !== null || minuteValue !== null) {
+                // Only time selected, use today's date
+                const today = new Date();
+                const year = today.getFullYear();
+                const month = String(today.getMonth() + 1).padStart(2, '0');
+                const day = String(today.getDate()).padStart(2, '0');
+                const timeStr = `${hourValue || '00'}:${minuteValue || '00'}`;
+                startTimeFilterValue = `${year}-${month}-${day} ${timeStr}`;
+            }
+            
+            // ALWAYS calculate current week range (Monday to Sunday) for sports loading
+            const weekRange = this.getWeekRange(); // Use current date
+            const weekStartTime = this.formatDateTime(weekRange.monday);
+            const weekEndTime = this.formatDateTime(weekRange.sunday);
+            
+            // Always add end_time for the current week (Sunday 23:59)
+            params.append('end_time', weekEndTime);
+            
+            // If user provided start time filter, use it (for exact time filtering)
+            // Otherwise, use week start time (Monday 00:00)
+            if (startTimeFilterValue) {
+                // Convert datetime-local format (yyyy-mm-ddTHH:mm) to API format (yyyy-mm-dd HH:mm)
+                const apiStartTime = startTimeFilterValue.replace('T', ' ');
+                params.append('start_time', apiStartTime);
+                console.log('📅 Using user filter start_time:', apiStartTime);
+            } else {
+                // Use week start time (Monday 00:00)
+                params.append('start_time', weekStartTime);
+            }
+            
+            console.log('📅 Auto-calculated week range (current week):', {
+                start_time: startTimeFilterValue ? startTimeFilterValue.replace('T', ' ') : weekStartTime,
+                end_time: weekEndTime,
+                monday: weekRange.monday.toLocaleDateString(),
+                sunday: weekRange.sunday.toLocaleDateString()
+            });
+            
+            // Display week range info to user
+            // Always check visibility based on current filter state
+            this.updateSportWeekInfoVisibility();
             
             // Apply filters (if provided, they override the search query)
             if (leagueFilter) {
@@ -899,14 +1271,6 @@ class TestAutomationDesktopApp {
                 params.append('match_name', matchNameFilter);
             }
             
-            if (startTimeFilter) {
-                params.append('start_time', startTimeFilter);
-            }
-            
-            if (endTimeFilter) {
-                params.append('end_time', endTimeFilter);
-            }
-            
             const sportsResponse = await this.apiCallWithAuth('GET', `/sports?${params}`);
             const optionsContainer = document.getElementById('sport-options');
             
@@ -914,6 +1278,10 @@ class TestAutomationDesktopApp {
             if (isNewSearch) {
                 optionsContainer.innerHTML = '';
             }
+            
+            // Update week info visibility after loading sports (respects filter state)
+            // Don't force show - let updateSportWeekInfoVisibility() handle it based on filter
+            this.updateSportWeekInfoVisibility();
             
             if (sportsResponse.data && sportsResponse.data.length > 0) {
                 console.log('Loading sports:', sportsResponse.data);
@@ -946,24 +1314,85 @@ class TestAutomationDesktopApp {
                 // Show dropdown after populating
                 document.getElementById('sport-dropdown').classList.remove('hidden');
                 
-                // Check if there's more data
-                if (sportsResponse.data.length < 10) {
-                    this.hasMoreSports = false;
+                // Check if there's more data - use meta.has_next if available, otherwise check data length
+                if (sportsResponse.meta && sportsResponse.meta.has_next !== undefined) {
+                    // Use API's has_next flag if available
+                    this.hasMoreSports = sportsResponse.meta.has_next;
+                } else {
+                    // Fallback: if we got exactly 10 items, assume there might be more
+                    if (sportsResponse.data.length < 10) {
+                        this.hasMoreSports = false;
+                    } else {
+                        // If we got 10 items, assume there might be more (unless API tells us otherwise)
+                        this.hasMoreSports = true;
+                    }
                 }
             } else if (isNewSearch) {
                 optionsContainer.innerHTML = '<div class="sport-loading">No sports found</div>';
-            }
-            
-            if (isNewSearch) {
-                this.showNotification('Sports loaded successfully', 'success');
             }
         } catch (error) {
             if (isNewSearch) {
                 this.showNotification('Failed to load sports: ' + error.message, 'error');
             }
-        } finally {
-            if (isNewSearch) {
-                this.hideLoading();
+        }
+    }
+
+    async loadSocialMediaRadioButtons() {
+        try {
+            const container = document.getElementById('social-media-radio-container');
+            if (!container) return;
+            
+            // Check if user is logged in
+            if (!this.accessToken) {
+                container.innerHTML = '<div style="color: #6c757d; font-size: 14px">Please login first</div>';
+                return;
+            }
+            
+            container.innerHTML = '<div style="color: #6c757d; font-size: 14px">Loading platforms...</div>';
+            
+            // Load all social media platforms (no pagination needed for radio buttons)
+            const params = new URLSearchParams({
+                page: '1',
+                page_size: '100', // Load all platforms
+                order_by: 'type',
+                order_desc: 'false'
+            });
+            
+            const response = await this.apiCallWithAuth('GET', `/social_media/?${params}`);
+            
+            if (response.data && response.data.length > 0) {
+                console.log('Loading social media platforms:', response.data);
+                container.innerHTML = '';
+                
+                response.data.forEach(socialMedia => {
+                    const label = document.createElement('label');
+                    label.style.cssText = 'display: flex; align-items: center; cursor: pointer; padding: 8px; border-radius: 4px; transition: background-color 0.15s;';
+                    label.onmouseover = () => label.style.backgroundColor = '#f8f9fa';
+                    label.onmouseout = () => label.style.backgroundColor = 'transparent';
+                    
+                    const radio = document.createElement('input');
+                    radio.type = 'radio';
+                    radio.name = 'social-media-platform';
+                    radio.value = socialMedia.id;
+                    radio.dataset.type = socialMedia.type || '';
+                    radio.style.cssText = 'margin-right: 8px; width: 18px; height: 18px; cursor: pointer;';
+                    
+                    const span = document.createElement('span');
+                    span.textContent = socialMedia.type || 'Unknown';
+                    span.style.fontSize = '16px';
+                    
+                    label.appendChild(radio);
+                    label.appendChild(span);
+                    container.appendChild(label);
+                });
+            } else {
+                container.innerHTML = '<div style="color: #dc3545; font-size: 14px">No social media platforms found</div>';
+            }
+        } catch (error) {
+            console.error('Error loading social media platforms:', error);
+            const container = document.getElementById('social-media-radio-container');
+            if (container) {
+                container.innerHTML = '<div style="color: #dc3545; font-size: 14px">Error loading platforms. Please refresh.</div>';
             }
         }
     }
@@ -1205,12 +1634,27 @@ class TestAutomationDesktopApp {
         const regionId = regionInput.dataset.value || regionInput.value;
         const sportId = sportInput.dataset.value || sportInput.value;
 
-        console.log('Start session - Region ID:', regionId, 'Sport ID:', sportId);
+        // Get social media platform selection from radio buttons
+        const selectedRadio = document.querySelector('input[name="social-media-platform"]:checked');
+        let socialMediaTypeId = null;
+        let socialMediaType = null;
+        
+        if (selectedRadio) {
+            socialMediaTypeId = selectedRadio.value;
+            socialMediaType = selectedRadio.dataset.type || '';
+        }
+
+        console.log('Start session - Region ID:', regionId, 'Sport ID:', sportId, 'Social Media Type ID:', socialMediaTypeId, 'Type:', socialMediaType);
         console.log('Region input value:', regionInput.value, 'dataset:', regionInput.dataset.value);
         console.log('Sport input value:', sportInput.value, 'dataset:', sportInput.dataset.value);
 
         if (!regionId || !sportId) {
             this.showNotification('Please select region and sport', 'error');
+            return;
+        }
+
+        if (!socialMediaTypeId) {
+            this.showNotification('Please select a social media platform', 'error');
             return;
         }
 
@@ -1222,6 +1666,9 @@ class TestAutomationDesktopApp {
             
             // Use stored sport data for bucket name
             let sportInfo = '';
+            const sportInput = document.getElementById('sport');
+            const sportValue = sportInput.value || '';
+            
             if (this.currentLeague && this.currentMatchName) {
                 sportInfo = `${this.currentLeague} ${this.currentMatchName}`;
                 console.log('🏈 Using stored sport data:', {
@@ -1229,11 +1676,35 @@ class TestAutomationDesktopApp {
                     matchName: this.currentMatchName,
                     sportInfo: sportInfo
                 });
-            } else {
-                console.log('⚠️ No stored sport data, using fallback');
-                const sportInput = document.getElementById('sport');
-                const sportValue = sportInput.value || '';
-                sportInfo = sportValue;
+            } else if (sportValue) {
+                // If no stored data but sport input has value, try to parse it
+                console.log('⚠️ No stored sport data, parsing from sport input:', sportValue);
+                this.parseAndStoreSportData(sportValue);
+                
+                if (this.currentLeague && this.currentMatchName) {
+                    // Successfully parsed, use parsed data
+                    sportInfo = `${this.currentLeague} ${this.currentMatchName}`;
+                    console.log('✅ Parsed sport data:', {
+                        league: this.currentLeague,
+                        matchName: this.currentMatchName,
+                        sportInfo: sportInfo
+                    });
+                } else {
+                    // Failed to parse, use raw value but remove date format if present
+                    // Format: "league - date - match" -> "league match"
+                    if (sportValue.includes(' - ')) {
+                        const parts = sportValue.split(' - ');
+                        if (parts.length >= 3) {
+                            // Remove date part (usually index 1) and join league + match
+                            sportInfo = `${parts[0].trim()} ${parts.slice(2).join(' - ').trim()}`;
+                            console.log('📝 Cleaned sport value (removed date):', sportInfo);
+                        } else {
+                            sportInfo = sportValue;
+                        }
+                    } else {
+                        sportInfo = sportValue;
+                    }
+                }
             }
             
             // Generate default bucket name: region/DD-MM-YYYY/league match_name
@@ -1249,21 +1720,22 @@ class TestAutomationDesktopApp {
                 defaultBucketName += `/${sportInfo}`;
             }
             
-            // Set default bucket name if empty
+            // Always set bucket name when starting session (fix bug: regenerate on each start)
             const bucketInput = document.getElementById('bucket-name');
-            if (!bucketInput.value.trim()) {
-                bucketInput.value = defaultBucketName;
-            }
+            bucketInput.value = defaultBucketName;
             
-            // Get sport name for session - use stored data or fallback
+            // Get sport name for session - use stored data or parsed data
             const sportNameForSession = sportInfo || sportValue;
             
             console.log('DEBUG: sportName extracted:', sportNameForSession);
             
-            // Use session service to start session
-            const result = this.sessionService.startSession(regionId, sportId, sportNameForSession);
+            // Use session service to start session (with social_media_type_id and type)
+            const result = this.sessionService.startSession(regionId, sportId, sportNameForSession, socialMediaTypeId, socialMediaType);
             
             if (result.success) {
+                // Highlight selected fields to show active session parameters
+                this.highlightSessionFields(true);
+                
                 // Update UI
                 this.updateSessionStatus('active');
                 this.showNotification('Session started! Press Ctrl+Shift+Q to take screenshots.', 'success');
@@ -1281,16 +1753,97 @@ class TestAutomationDesktopApp {
         }
     }
 
+    highlightSessionFields(active) {
+        // Get selected fields
+        const regionInput = document.getElementById('region');
+        const sportInput = document.getElementById('sport');
+        const bucketInput = document.getElementById('bucket-name');
+        
+        // Get parent form groups
+        const regionGroup = regionInput?.closest('.form-group');
+        const sportGroup = sportInput?.closest('.form-group');
+        const bucketGroup = bucketInput?.closest('.form-group');
+        
+        if (active) {
+            // Add highlight classes
+            if (regionInput) {
+                regionInput.classList.add('session-active');
+            }
+            if (regionGroup) {
+                regionGroup.classList.add('session-active');
+            }
+            
+            if (sportInput) {
+                sportInput.classList.add('session-active');
+            }
+            if (sportGroup) {
+                sportGroup.classList.add('session-active');
+            }
+            
+            if (bucketInput) {
+                bucketInput.classList.add('session-active');
+            }
+            if (bucketGroup) {
+                bucketGroup.classList.add('session-active');
+            }
+            
+            // Highlight selected social media radio button
+            const selectedRadio = document.querySelector('input[name="social-media-platform"]:checked');
+            if (selectedRadio) {
+                const radioLabel = selectedRadio.closest('label');
+                if (radioLabel) {
+                    radioLabel.style.cssText = 'display: flex; align-items: center; cursor: pointer; padding: 8px; border-radius: 6px; background: #e8f5e9 !important; border: 2px solid #27ae60; font-weight: 600;';
+                }
+            }
+        } else {
+            // Remove highlight classes
+            if (regionInput) {
+                regionInput.classList.remove('session-active');
+            }
+            if (regionGroup) {
+                regionGroup.classList.remove('session-active');
+            }
+            
+            if (sportInput) {
+                sportInput.classList.remove('session-active');
+            }
+            if (sportGroup) {
+                sportGroup.classList.remove('session-active');
+            }
+            
+            if (bucketInput) {
+                bucketInput.classList.remove('session-active');
+            }
+            if (bucketGroup) {
+                bucketGroup.classList.remove('session-active');
+            }
+            
+            // Reset all social media radio button labels
+            const allRadioLabels = document.querySelectorAll('#social-media-radio-container label');
+            allRadioLabels.forEach(label => {
+                label.style.cssText = 'display: flex; align-items: center; cursor: pointer; padding: 8px; border-radius: 4px; transition: background-color 0.15s;';
+            });
+        }
+    }
+
     stopSession() {
         try {
             // Use session service to stop session
             const result = this.sessionService.stopSession();
             
             if (result.success) {
+                // Remove highlight from fields
+                this.highlightSessionFields(false);
+                
                 // Clear stored sport data
                 this.currentLeague = null;
                 this.currentMatchName = null;
                 console.log('🧹 Cleared stored sport data');
+                
+                // Clear URL check cache if exists
+                if (this.apiService) {
+                    this.apiService.clearCache();
+                }
                 
                 // Update UI
                 this.updateSessionStatus('Not Started');
@@ -1764,6 +2317,28 @@ class TestAutomationDesktopApp {
             return;
         }
 
+        // Check if platform is facebook and validate view field
+        const socialMediaType = this.sessionService.getSocialMediaType();
+        const isFacebook = socialMediaType && socialMediaType.toLowerCase() === 'facebook';
+        if (isFacebook) {
+            const viewInput = document.getElementById('popup-view');
+            const viewValue = viewInput?.value?.trim();
+            
+            if (!viewValue) {
+                this.showNotification('Please enter a view (required for Facebook platform)', 'error');
+                viewInput?.focus();
+                return;
+            }
+            
+            // Validate view is a positive integer
+            const viewInt = parseInt(viewValue, 10);
+            if (isNaN(viewInt) || viewInt <= 0) {
+                this.showNotification('View must be a positive number', 'error');
+                viewInput?.focus();
+                return;
+            }
+        }
+
         // Upload screenshot
         this.uploadScreenshotFromPopup();
     }
@@ -1813,9 +2388,30 @@ class TestAutomationDesktopApp {
         const url = document.getElementById('url').value;
         const bucketName = document.getElementById('bucket-name').value;
 
+        // Get view value if social media type is facebook
+        const socialMediaType = this.sessionService.getSocialMediaType();
+        const isFacebook = socialMediaType && socialMediaType.toLowerCase() === 'facebook';
+        const viewInput = document.getElementById('popup-view');
+        let view = null;
+        
+        if (isFacebook && viewInput && viewInput.value.trim()) {
+            const viewValue = viewInput.value.trim();
+            // Validate view is a positive integer
+            const viewInt = parseInt(viewValue, 10);
+            if (isNaN(viewInt) || viewInt <= 0) {
+                this.showNotification('View must be a positive number', 'error');
+                viewInput.focus();
+                return;
+            }
+            view = viewInt; // Store as integer
+        }
+
         console.log('URL check:', url);
         console.log('Bucket name:', bucketName);
         console.log('Selected signal:', selectedSignal);
+        console.log('Social Media Type:', socialMediaType);
+        console.log('Is Facebook:', isFacebook);
+        console.log('View:', view);
 
         if (!url || url === 'No URL detected') {
             console.log('❌ No URL available for upload');
@@ -1832,6 +2428,13 @@ class TestAutomationDesktopApp {
             this.showNotification('Please select a signal', 'error');
                 return;
             }
+
+        // Validate view for facebook platform
+        if (isFacebook && !view) {
+            this.showNotification('Please enter a view (required for Facebook platform)', 'error');
+            viewInput?.focus();
+            return;
+        }
             
         // QUEUE UPLOAD (background processing) - immediate feedback
         const signalName = document.getElementById('popup-signal').value;
@@ -1844,8 +2447,8 @@ class TestAutomationDesktopApp {
         const sessionData = this.sessionService.getSessionData();
         const userData = this.sessionService.getCurrentUser();
         
-        // Add to upload queue for background processing
-        const queueId = this.uiService.addToUploadQueue(selectedSignal, currentUrl, bucketName, signalName, this.screenshotData, sessionData, userData);
+        // Add to upload queue for background processing (with view if facebook)
+        const queueId = this.uiService.addToUploadQueue(selectedSignal, currentUrl, bucketName, signalName, this.screenshotData, sessionData, userData, view);
         
         if (queueId) {
             // Immediate feedback - no waiting for API

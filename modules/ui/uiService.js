@@ -1,5 +1,6 @@
 // UI Service Module - Handles UI operations and notifications
 const { ipcRenderer } = require('electron');
+const SessionService = require('../session/sessionService');
 
 class UiService {
     constructor() {
@@ -7,9 +8,29 @@ class UiService {
         this.notificationTimeout = null;
         this.wasVisibleBeforeScreenshot = true; // Track if window was visible before screenshot
         this.notificationHistory = []; // Track all notifications
+        this.queueItemTimeouts = new Map(); // Track timeouts for queue items
+        this.sessionService = null; // Will be set from renderer
         this.setupUploadQueue();
         this.setupNotificationClose();
         this.setupNotificationClearAll();
+    }
+
+    setSessionService(sessionService) {
+        this.sessionService = sessionService;
+    }
+
+    getCurrentPlatform() {
+        if (this.sessionService) {
+            return this.sessionService.getPlatform();
+        }
+        return null;
+    }
+
+    getCurrentSocialMediaType() {
+        if (this.sessionService) {
+            return this.sessionService.getSocialMediaType();
+        }
+        return null;
     }
 
     setupUploadQueue() {
@@ -91,7 +112,7 @@ class UiService {
         }
     }
 
-    async showNotification(message, type = 'info') {
+    async showNotification(message, type = 'info', fromQueue = false) {
         const notification = document.getElementById('notification');
         const text = document.getElementById('notification-text');
         
@@ -103,7 +124,13 @@ class UiService {
         });
         
         text.textContent = message;
-        notification.className = `notification ${type}`;
+        
+        // Add 'from-queue' class if notification is from queue
+        let className = `notification ${type}`;
+        if (fromQueue) {
+            className += ' from-queue';
+        }
+        notification.className = className;
         notification.classList.remove('hidden');
 
         // Show/hide Clear All button based on notification type
@@ -124,23 +151,40 @@ class UiService {
 
         // Auto-hide only for success and info, errors persist forever
         if (type === 'success' || type === 'info') {
-            // Get notification duration from settings
-            let duration = 15000; // Default 15 seconds
-            try {
-                const { ipcRenderer } = require('electron');
-                const settings = await ipcRenderer.invoke('get-settings');
-                duration = settings.notificationDuration || 15000;
-            } catch (error) {
-                console.error('Failed to get notification duration from settings:', error);
+            // Success notifications: 5 seconds (5000ms)
+            // Info notifications: use settings duration
+            let duration = type === 'success' ? 5000 : 15000; // Default 15 seconds for info
+            
+            if (type === 'info') {
+                try {
+                    const { ipcRenderer } = require('electron');
+                    const settings = await ipcRenderer.invoke('get-settings');
+                    duration = settings.notificationDuration || 15000;
+                } catch (error) {
+                    console.error('Failed to get notification duration from settings:', error);
+                }
             }
             
             this.notificationTimeout = setTimeout(() => {
-                const currentType = notification.className.split(' ').find(cls => 
+                // Check if notification is still visible
+                const isHidden = notification.classList.contains('hidden');
+                const notificationClasses = notification.className.split(' ');
+                const displayedType = notificationClasses.find(cls => 
                     ['success', 'info', 'error', 'warning'].includes(cls)
                 );
-                // Only auto-hide if still showing this notification (not replaced)
-                if (currentType === type || currentType === 'success' || currentType === 'info') {
-                    notification.classList.add('hidden');
+                
+                // Auto-hide success notifications after 5s (always hide if it's success type)
+                // For info, only hide if still showing info type
+                if (!isHidden) {
+                    if (displayedType === 'success') {
+                        // Success notifications always hide after 5s
+                        notification.classList.add('hidden');
+                        console.log(`✅ Auto-hiding success notification after ${duration}ms`);
+                    } else if (displayedType === 'info' && type === 'info') {
+                        // Info notifications hide if still showing info type
+                        notification.classList.add('hidden');
+                        console.log(`✅ Auto-hiding info notification after ${duration}ms`);
+                    }
                 }
             }, duration);
         }
@@ -230,6 +274,32 @@ class UiService {
             showCreateSignalBtn.classList.remove('hidden');
         }
 
+        // Show/hide view field based on platform
+        const viewSection = document.getElementById('popup-view-section');
+        const viewInput = document.getElementById('popup-view');
+        
+        // Get social media type from session service
+        const socialMediaType = this.getCurrentSocialMediaType();
+        const isFacebook = socialMediaType && socialMediaType.toLowerCase() === 'facebook';
+        
+        if (isFacebook) {
+            if (viewSection) {
+                viewSection.classList.remove('hidden');
+            }
+            if (viewInput) {
+                viewInput.value = ''; // Clear previous value
+                viewInput.required = true;
+            }
+        } else {
+            if (viewSection) {
+                viewSection.classList.add('hidden');
+            }
+            if (viewInput) {
+                viewInput.value = '';
+                viewInput.required = false;
+            }
+        }
+
         // Show popup
         popup.classList.remove('hidden');
         
@@ -251,7 +321,7 @@ class UiService {
     }
 
     // Upload Queue Management
-    addToUploadQueue(signalId, url, bucketName, signalName = '', screenshotData, sessionData = null, userData = null) {
+    addToUploadQueue(signalId, url, bucketName, signalName = '', screenshotData, sessionData = null, userData = null, view = null) {
         // Check if session is still valid before adding to queue
         if (!screenshotData || !screenshotData.path) {
             this.showNotification('No screenshot available for upload', 'error');
@@ -273,6 +343,10 @@ class UiService {
             return null;
         }
         
+        // Get social media info from session data
+        const socialMediaTypeId = sessionData?.socialMediaTypeId || null;
+        const socialMediaType = sessionData?.socialMediaType || null;
+        
         const queueItem = {
             id: Date.now(),
             signalId,
@@ -281,6 +355,10 @@ class UiService {
             signalName,
             sportId,
             assignedUserId,
+            socialMediaTypeId: socialMediaTypeId,
+            socialMediaType: socialMediaType,
+            view: view, // View field for Facebook platform
+            sessionData: sessionData, // Store full session data for later use
             filePath: screenshotData.path,
             status: 'uploading',
             timestamp: new Date(),
@@ -382,6 +460,12 @@ class UiService {
     }
 
     removeFromQueue(itemId) {
+        // Clear timeout if exists
+        if (this.queueItemTimeouts.has(itemId)) {
+            clearTimeout(this.queueItemTimeouts.get(itemId));
+            this.queueItemTimeouts.delete(itemId);
+        }
+        
         this.uploadQueue = this.uploadQueue.filter(item => item.id !== itemId);
         this.updateQueueDisplay();
         
@@ -390,7 +474,30 @@ class UiService {
         }
     }
 
+    scheduleQueueItemRemoval(itemId, delay = 5000) {
+        // Clear existing timeout if any
+        if (this.queueItemTimeouts.has(itemId)) {
+            clearTimeout(this.queueItemTimeouts.get(itemId));
+        }
+        
+        // Only remove success items, keep error items
+        const timeout = setTimeout(() => {
+            const item = this.uploadQueue.find(q => q.id === itemId);
+            if (item && item.status === 'success') {
+                console.log(`🗑️ Auto-removing success queue item after ${delay}ms:`, itemId);
+                this.removeFromQueue(itemId);
+            }
+            this.queueItemTimeouts.delete(itemId);
+        }, delay);
+        
+        this.queueItemTimeouts.set(itemId, timeout);
+    }
+
     clearUploadQueue() {
+        // Clear all timeouts
+        this.queueItemTimeouts.forEach(timeout => clearTimeout(timeout));
+        this.queueItemTimeouts.clear();
+        
         this.uploadQueue = [];
         this.updateQueueDisplay();
         this.hideQueue();
@@ -398,8 +505,17 @@ class UiService {
     }
 
     clearUploadQueueExceptErrors() {
-        // Only remove success and uploading items, keep errors
+        // Clear timeouts for items that will be removed
         const errorItems = this.uploadQueue.filter(item => item.status === 'error');
+        const itemsToRemove = this.uploadQueue.filter(item => item.status !== 'error');
+        
+        itemsToRemove.forEach(item => {
+            if (this.queueItemTimeouts.has(item.id)) {
+                clearTimeout(this.queueItemTimeouts.get(item.id));
+                this.queueItemTimeouts.delete(item.id);
+            }
+        });
+        
         const removedCount = this.uploadQueue.length - errorItems.length;
         
         this.uploadQueue = errorItems; // Keep only error items
@@ -513,12 +629,41 @@ class UiService {
             
             // Step 2: Create detected link with signal_id
             console.log('🔗 Creating detected link for URL:', url);
-            const linkResult = await ipcRenderer.invoke('create-detected-link', {
+            
+            // Get social_media_type_id from session
+            const sessionData = queueItem.sessionData || {};
+            const socialMediaTypeId = sessionData.socialMediaTypeId || queueItem.socialMediaTypeId;
+            const socialMediaType = sessionData.socialMediaType || queueItem.socialMediaType;
+            
+            // Prepare detected link data
+            const detectedLinkData = {
                 url: url,
                 sportId: sportId,
                 signalId: signalId,
-                assignedUserId: assignedUserId
-            });
+                assignedUserId: assignedUserId,
+                social_media_type_id: socialMediaTypeId
+            };
+            
+            // Add view field if social media type is facebook (must be integer)
+            const isFacebook = socialMediaType && socialMediaType.toLowerCase() === 'facebook';
+            if (isFacebook && queueItem.view !== null && queueItem.view !== undefined) {
+                // Ensure view is an integer
+                const viewInt = parseInt(queueItem.view, 10);
+                if (!isNaN(viewInt) && viewInt > 0) {
+                    detectedLinkData.view = viewInt;
+                    console.log('📘 Adding view field for Facebook platform (as int):', viewInt);
+                } else {
+                    console.error('❌ Invalid view value:', queueItem.view);
+                    queueItem.status = 'error';
+                    queueItem.error = 'Invalid view value. View must be a positive number.';
+                    this.updateQueueDisplay();
+                    this.showErrorPopupWithDetails(queueItem);
+                    return;
+                }
+            }
+            
+            console.log('📤 Creating detected link with data:', detectedLinkData);
+            const linkResult = await ipcRenderer.invoke('create-detected-link', detectedLinkData);
             
             // Handle link creation result
             if (!linkResult.success) {
@@ -572,9 +717,12 @@ class UiService {
                 queueItem.imageUrl = uploadResult.data?.image_url || uploadResult.imageUrl;
                 this.updateQueueDisplay();
                 
-                // Show success notification
-                this.showNotification(`✅ Screenshot uploaded successfully to folder: ${bucketName}!`, 'success');
-                this.showNotification(`📁 Local file kept: ${filePath}`, 'info');
+                // Auto-remove success item after 5 seconds
+                this.scheduleQueueItemRemoval(queueItem.id, 5000);
+                
+                // Show success notification (from queue - will appear on left side)
+                this.showNotification(`✅ Screenshot uploaded successfully to folder: ${bucketName}!`, 'success', true);
+                this.showNotification(`📁 Local file kept: ${filePath}`, 'info', true);
                 console.log('✅ Upload completed successfully');
                 console.log('📁 Original file preserved:', filePath);
                 
@@ -776,8 +924,11 @@ class UiService {
                 queueItem.imageUrl = uploadResult.data?.image_url || uploadResult.imageUrl;
                 this.updateQueueDisplay();
                 
-                // Show success notification
-                this.showNotification(`✅ Retry successful! Screenshot uploaded to folder: ${queueItem.bucketName}!`, 'success');
+                // Auto-remove success item after 5 seconds
+                this.scheduleQueueItemRemoval(queueItem.id, 5000);
+                
+                // Show success notification (from queue - will appear on left side)
+                this.showNotification(`✅ Retry successful! Screenshot uploaded to folder: ${queueItem.bucketName}!`, 'success', true);
                 console.log('✅ Retry upload completed successfully');
             } else {
                 // Error - update queue item

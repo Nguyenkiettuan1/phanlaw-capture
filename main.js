@@ -190,7 +190,7 @@ class TestAutomationApp {
 
     setupAutoUpdater() {
         // Configure auto-updater for GitHub releases
-        // electron-updater works with GitHub releases automatically
+        // electron-updater automatically reads from package.json build.publish config
         // It looks for latest.yml in GitHub releases
         
         // Check if running in development
@@ -199,31 +199,18 @@ class TestAutomationApp {
             return;
         }
         
-        // Configure GitHub provider
-        // electron-updater will automatically use package.json build.publish config
-        // But we can also set it manually for clarity
-        const updateConfig = {
-            provider: 'github',
-            owner: 'Nguyenkiettuan1',
-            repo: 'phanlaw-capture'
-        };
-        
         console.log('📦 Configuring auto-updater...');
-        console.log(`   Provider: ${updateConfig.provider}`);
-        console.log(`   Repository: ${updateConfig.owner}/${updateConfig.repo}`);
+        console.log('   Reading config from package.json build.publish');
         
-        // Note: electron-updater automatically detects GitHub provider from package.json
-        // But we set it explicitly here for portable builds
-        try {
-            autoUpdater.setFeedURL(updateConfig);
-        } catch (error) {
-            console.warn('⚠️  Could not set update feed URL:', error.message);
-            // Continue anyway, electron-updater might still work with package.json config
-        }
+        // electron-updater automatically reads from package.json build.publish
+        // No need to call setFeedURL() - it will use the config from package.json
         
         // Configure auto-updater behavior
         autoUpdater.autoDownload = false; // Don't auto-download, ask user first
         autoUpdater.autoInstallOnAppQuit = true;
+        
+        // Set update channel (optional, for portable builds)
+        autoUpdater.channel = 'latest';
 
         // Update available
         autoUpdater.on('update-available', (info) => {
@@ -249,6 +236,17 @@ class TestAutomationApp {
         // No update available
         autoUpdater.on('update-not-available', (info) => {
             console.log('✅ App is up to date:', info.version);
+            
+            if (this.mainWindow) {
+                dialog.showMessageBoxSync(this.mainWindow, {
+                    type: 'info',
+                    buttons: ['OK'],
+                    title: 'No Updates',
+                    message: 'You are using the latest version!',
+                    detail: `Current version: ${info.version || 'Unknown'}`,
+                    defaultId: 0
+                });
+            }
         });
 
         // Download progress
@@ -285,16 +283,28 @@ class TestAutomationApp {
         // Error
         autoUpdater.on('error', (error) => {
             console.error('❌ Auto-updater error:', error);
+            console.error('Error details:', error.message, error.stack);
+            
+            if (this.mainWindow) {
+                // Send error to renderer for user notification
+                this.mainWindow.webContents.send('update-error', {
+                    message: error.message || 'Failed to check for updates',
+                    details: error.stack
+                });
+            }
         });
     }
 
-    async checkForUpdates() {
+    async checkForUpdates(force = false) {
         try {
-            const settings = this.settingsService.getAllSettings();
-            
-            if (!settings.checkUpdatesOnStartup) {
-                console.log('⏭️ Auto-update check disabled in settings');
-                return;
+            // If not forced, check settings
+            if (!force) {
+                const settings = this.settingsService.getAllSettings();
+                
+                if (!settings.checkUpdatesOnStartup) {
+                    console.log('⏭️ Auto-update check disabled in settings');
+                    return { success: false, message: 'Update check disabled in settings' };
+                }
             }
 
             console.log('🔍 Checking for updates...');
@@ -305,10 +315,23 @@ class TestAutomationApp {
             }
             
             // Check for updates
-            await autoUpdater.checkForUpdates();
+            const result = await autoUpdater.checkForUpdates();
+            
+            console.log('✅ Update check completed:', result);
+            
+            return { success: true, result: result };
             
         } catch (error) {
             console.error('❌ Update check failed:', error);
+            
+            if (this.mainWindow) {
+                this.mainWindow.webContents.send('update-error', {
+                    message: error.message || 'Failed to check for updates',
+                    details: error.stack
+                });
+            }
+            
+            return { success: false, error: error.message };
         }
     }
 
@@ -617,6 +640,10 @@ ipcMain.handle('get-sports', async (event, { regionId, searchQuery = '', page = 
     return await testApp.apiService.getSports(regionId, searchQuery, page, pageSize);
 });
 
+ipcMain.handle('get-social-media', async (event, { searchQuery = '', page = 1, pageSize = 10, type = null } = {}) => {
+    return await testApp.apiService.getSocialMedia(searchQuery, page, pageSize, type);
+});
+
 // New IPC handlers for screenshot workflow
 ipcMain.handle('take-screenshot', async (event) => {
     try {
@@ -666,8 +693,22 @@ ipcMain.handle('check-url-exists', async (event, { url, sportId }) => {
     return await testApp.apiService.checkUrlExists(url, sportId);
 });
 
-ipcMain.handle('create-detected-link', async (event, { url, sportId, signalId, assignedUserId }) => {
-    return await testApp.apiService.createDetectedLink(url, sportId, signalId, assignedUserId);
+ipcMain.handle('create-detected-link', async (event, data) => {
+    // Extract parameters from data object (supports both camelCase and snake_case)
+    const { 
+        url, 
+        sportId, 
+        signalId, 
+        assignedUserId, 
+        social_media_type_id,  // snake_case from uiService
+        socialMediaTypeId,      // camelCase alternative
+        view 
+    } = data;
+    
+    // Use social_media_type_id if provided, otherwise use socialMediaTypeId
+    const socialMediaId = social_media_type_id || socialMediaTypeId;
+    
+    return await testApp.apiService.createDetectedLink(url, sportId, signalId, assignedUserId, socialMediaId, view);
 });
 
 ipcMain.handle('upload-screenshot', async (event, { filePath, detectedLinkId, bucketName = 'screenshots', provider = 'GOOGLE_CLOUD' }) => {
@@ -864,6 +905,15 @@ ipcMain.handle('get-screenshots-path', async (event) => {
 });
 
 // Find file in screenshots folder handler
+ipcMain.handle('check-for-updates', async (event, { force = false } = {}) => {
+    try {
+        const result = await testApp.checkForUpdates(force);
+        return result;
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
 ipcMain.handle('find-file-in-screenshots', async (event, { fileName, screenshotsDir }) => {
     try {
         const fs = require('fs');
