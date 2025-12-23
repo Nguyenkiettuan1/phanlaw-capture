@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-GB">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -80,33 +80,15 @@
                   </div>
                   <div class="form-group">
                     <label for="sport">Sport</label>
-                    <div
-                      id="sport-week-info"
-                      class="sport-week-info"
-                      style="
-                        display: none;
-                        margin-top: 5px;
-                        font-size: 12px;
-                        color: #6c757d;
-                        font-style: italic;
-                      "
-                    >
-                      📅 Đang hiển thị sports từ
-                      <span id="sport-week-start" style="font-weight: bold"
-                        >...</span
-                      >
-                      đến
-                      <span id="sport-week-end" style="font-weight: bold"
-                        >...</span
-                      >
-                    </div>
                     <div class="sport-container">
                       <input
                         type="text"
                         id="sport"
                         class="form-control"
-                        placeholder="Search or select sport..."
+                        placeholder="Select sport from table below..."
                         autocomplete="off"
+                        readonly
+                        style="background-color: #f8f9fa; cursor: pointer"
                       />
                       <div id="sport-dropdown" class="sport-dropdown hidden">
                         <div id="sport-options"></div>
@@ -115,99 +97,140 @@
                   </div>
                 </div>
 
-                <!-- Sport Advanced Filters -->
-                <div class="sport-filters-section">
-                  <h4 style="margin-bottom: 15px; color: #495057">
-                    🔍 Sport Filters (Optional)
-                  </h4>
-                  <div class="form-row">
-                    <div class="form-group">
-                      <label for="sport-league">League (Mùa giải)</label>
-                      <input
-                        type="text"
-                        id="sport-league"
-                        class="form-control"
-                        placeholder="e.g., Premier League, La Liga..."
-                      />
-                    </div>
-                    <div class="form-group">
-                      <label for="sport-match-name"
-                        >Match Name (Tên trận)</label
-                      >
-                      <input
-                        type="text"
-                        id="sport-match-name"
-                        class="form-control"
-                        placeholder="e.g., Manchester, Liverpool..."
-                      />
-                    </div>
-                  </div>
-                  <div class="form-row">
-                    <div class="form-group">
-                      <label for="sport-start-time"
-                        >Start Time (Từ) - Lọc chính xác ngày giờ</label
-                      >
-                      <div
-                        style="
-                          display: flex;
-                          gap: 8px;
-                          align-items: center;
-                          flex-wrap: wrap;
-                        "
-                      >
-                        <input
-                          type="date"
-                          id="sport-start-time-date"
-                          class="form-control"
-                          style="flex: 1; min-width: 150px"
-                        />
-                        <div
-                          style="display: flex; gap: 4px; align-items: center"
-                        >
+                <!-- Sport Selection Component (Always Visible) -->
+                <div
+                  class="sport-selection-component"
+                  id="sport-selection-component"
+                  style="
+                    margin-top: 20px;
+                    padding: 15px;
+                    background: #fff;
+                    border-radius: 8px;
+                    border: 1px solid #e0e0e0;
+                  "
+                >
+                  <!-- Sport Filters Section -->
+                  <div
+                    class="sport-filters-section"
+                    style="margin-bottom: 15px"
+                  >
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="sport-league">League (Mùa giải)</label>
+                        <div class="league-container">
                           <input
-                            type="number"
-                            id="sport-start-time-hour"
+                            type="text"
+                            id="sport-league"
                             class="form-control"
-                            min="0"
-                            max="23"
-                            placeholder="HH"
-                            style="
-                              width: 75px;
-                              text-align: center;
-                              font-size: 14px;
-                              padding: 8px 4px;
-                            "
+                            placeholder="Search or select league..."
+                            autocomplete="off"
                           />
-                          <span style="font-weight: bold; font-size: 16px"
-                            >:</span
+                          <div
+                            id="league-dropdown"
+                            class="league-dropdown hidden"
                           >
-                          <input
-                            type="number"
-                            id="sport-start-time-minute"
-                            class="form-control"
-                            min="0"
-                            max="59"
-                            placeholder="MM"
-                            style="
-                              width: 75px;
-                              text-align: center;
-                              font-size: 14px;
-                              padding: 8px 4px;
-                            "
-                          />
+                            <div id="league-options"></div>
+                          </div>
                         </div>
                       </div>
-                      <small class="form-help">
-                        💡 Chọn ngày giờ từ lịch (tùy chọn, format 24 giờ: 00:00
-                        - 23:59). Sports sẽ tự động load theo tuần hiện tại (Thứ
-                        2 - Chủ nhật)
-                      </small>
+                      <div class="form-group">
+                        <label for="sport-match-name"
+                          >Match Name (Tên trận)</label
+                        >
+                        <input
+                          type="text"
+                          id="sport-match-name"
+                          class="form-control"
+                          placeholder="e.g., Manchester, Liverpool..."
+                        />
+                      </div>
+                      <div class="form-group">
+                        <label for="sport-start-time-date-picker"
+                          >Start Date (Từ)</label
+                        >
+                        <input
+                          type="date"
+                          id="sport-start-time-date-picker"
+                          class="form-control"
+                        />
+                      </div>
                     </div>
                   </div>
-                  <small class="form-help"
-                    >💡 These filters will be applied when you click on the
-                    Sport field to load options</small
+
+                  <!-- Sport Table -->
+                  <div
+                    class="sport-table-container"
+                    style="
+                      border: 1px solid #e0e0e0;
+                      border-radius: 4px;
+                      overflow: hidden;
+                      max-height: 400px;
+                      overflow-y: auto;
+                    "
                   >
+                    <table class="sport-table">
+                      <thead>
+                        <tr>
+                          <th style="width: 5%">#</th>
+                          <th style="width: 30%">League</th>
+                          <th style="width: 30%">Match Name</th>
+                          <th style="width: 25%">Start Time</th>
+                          <th style="width: 10%">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody id="sport-table-body">
+                        <tr>
+                          <td
+                            colspan="5"
+                            style="
+                              text-align: center;
+                              padding: 20px;
+                              color: #6c757d;
+                            "
+                          >
+                            Select a region first, then click "Apply Filters" to
+                            load sports...
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <!-- Pagination -->
+                  <div
+                    class="sport-pagination"
+                    id="sport-pagination"
+                    style="
+                      display: none;
+                      margin-top: 15px;
+                      justify-content: center;
+                    "
+                  >
+                    <button
+                      id="sport-prev-btn"
+                      class="btn btn-secondary"
+                      disabled
+                    >
+                      ← Previous
+                    </button>
+                    <span
+                      id="sport-page-info"
+                      style="
+                        margin: 0 15px;
+                        color: #6c757d;
+                        display: flex;
+                        align-items: center;
+                      "
+                      >Page 1</span
+                    >
+                    <button
+                      id="sport-next-btn"
+                      class="btn btn-secondary"
+                      disabled
+                    >
+                      Next →
+                    </button>
+                  </div>
                 </div>
 
                 <!-- Platform Selection (Social Media) -->
@@ -259,7 +282,8 @@
               </div>
               <div class="step-content">
                 <div class="form-row">
-                  <div class="form-group">
+                  <!-- Signal field hidden - chỉ hiện trong popup khi upload -->
+                  <div class="form-group hidden" id="signal-field-wrapper">
                     <label for="signal">Signal</label>
                     <div class="signal-container">
                       <input
@@ -274,20 +298,35 @@
                       </div>
                     </div>
                   </div>
-                  <div class="form-group">
-                    <label for="url">URL</label>
+                  <div class="form-group" style="width: 100%">
+                    <label for="url"
+                      >URL
+                      <small style="color: #6c757d"
+                        >(Tự động từ extension hoặc nhập thủ công)</small
+                      ></label
+                    >
                     <input
                       type="text"
                       id="url"
                       class="form-control"
-                      placeholder="Auto-detected or manual"
+                      placeholder="Auto-detected from extension or manual input"
                     />
-                    <button id="detect-url-btn" class="btn btn-secondary">
-                      Auto Detect
-                    </button>
-                    <button id="detect-clipboard-btn" class="btn btn-info">
-                      From Clipboard
-                    </button>
+                    <div style="margin-top: 8px; display: flex; gap: 8px">
+                      <button
+                        id="detect-url-btn"
+                        class="btn btn-secondary"
+                        style="flex: 1"
+                      >
+                        🔍 Auto Detect
+                      </button>
+                      <button
+                        id="detect-clipboard-btn"
+                        class="btn btn-info"
+                        style="flex: 1"
+                      >
+                        📋 From Clipboard
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div class="form-row">

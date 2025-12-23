@@ -375,6 +375,15 @@ body {
     border-color: #667eea;
 }
 
+/* Ensure time picker displays in 24h format */
+input[type="time"] {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+input[type="time"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+}
+
 .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1534,6 +1543,7 @@ body {
 .region-container,
 .sport-container,
 .signal-container,
+.league-container,
 .popup-signal-container {
     position: relative;
 }
@@ -1541,6 +1551,7 @@ body {
 .region-dropdown,
 .sport-dropdown,
 .signal-dropdown,
+.league-dropdown,
 .popup-signal-dropdown,
 .dropdown {
     position: absolute;
@@ -1553,23 +1564,24 @@ body {
     max-height: 200px;
     overflow-y: auto;
     z-index: 1000;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
 .region-option,
 .sport-option,
 .signal-option,
+.league-option,
 .popup-signal-option,
 .dropdown-option {
-    padding: 10px 15px;
+    padding: 8px 12px;
     cursor: pointer;
     border-bottom: 1px solid #f0f0f0;
-    transition: background-color 0.2s;
 }
 
 .region-option:hover,
 .sport-option:hover,
 .signal-option:hover,
+.league-option:hover,
 .popup-signal-option:hover,
 .dropdown-option:hover {
     background-color: #f8f9fa;
@@ -1578,6 +1590,7 @@ body {
 .region-option:last-child,
 .sport-option:last-child,
 .signal-option:last-child,
+.league-option:last-child,
 .popup-signal-option:last-child,
 .dropdown-option:last-child {
     border-bottom: none;
@@ -1586,6 +1599,7 @@ body {
 .region-option.selected,
 .sport-option.selected,
 .signal-option.selected,
+.league-option.selected,
 .popup-signal-option.selected {
     background-color: #007bff;
     color: white;
@@ -1594,6 +1608,7 @@ body {
 .region-loading,
 .sport-loading,
 .signal-loading,
+.league-loading,
 .popup-signal-loading {
     padding: 10px 15px;
     text-align: center;
@@ -1615,7 +1630,6 @@ body {
   border: 2px solid #e1e5e9;
   border-radius: 8px;
   font-size: 14px;
-  transition: all 0.3s ease;
   background: white;
 }
 
@@ -1665,7 +1679,6 @@ label:has(input[name="social-media-platform"]:checked) {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -1676,8 +1689,7 @@ label:has(input[name="social-media-platform"]:checked) {
 }
 
 .btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+  opacity: 0.9;
 }
 
 .btn-success {
@@ -1796,14 +1808,11 @@ label:has(input[name="social-media-platform"]:checked) {
   font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s ease;
 }
 
 .btn-outline-primary:hover {
   background: #007bff;
   color: white;
-  transform: translateY(-1px);
-  box-shadow: 0 3px 10px rgba(0, 123, 255, 0.3);
 }
 
 .btn-sm {
@@ -2011,4 +2020,100 @@ label:has(input[name="social-media-platform"]:checked) {
   background: #e7f3ff;
   border-left: 3px solid #3498db;
   border-radius: 4px;
+}
+
+/* Sport Selection Component Styles */
+.sport-selection-component {
+  /* Removed animation for speed */
+}
+
+/* Loading indicator for sport table */
+.sport-table-loading {
+  text-align: center;
+  padding: 20px;
+  color: #6c757d;
+}
+
+.sport-table-loading::before {
+  content: '';
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #e0e0e0;
+  border-top-color: #007bff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.sport-table-container {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+}
+
+.sport-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+}
+
+.sport-table thead {
+  position: sticky;
+  top: 0;
+  background: #f8f9fa;
+  z-index: 10;
+}
+
+.sport-table th {
+  padding: 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #495057;
+  border-bottom: 2px solid #dee2e6;
+  background: #f8f9fa;
+}
+
+.sport-table td {
+  padding: 12px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.sport-table tbody tr {
+  /* Removed transition for speed */
+}
+
+.sport-table tbody tr:hover {
+  background-color: #f8f9fa;
+  cursor: pointer;
+}
+
+.sport-table tbody tr.selected {
+  background-color: #e7f3ff;
+}
+
+.sport-table tbody tr.selected td {
+  color: #007bff;
+  font-weight: 500;
+}
+
+.sport-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.sport-pagination button {
+  padding: 8px 16px;
+  font-size: 14px;
+}
+
+.sport-pagination button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

@@ -91,7 +91,8 @@ class TestAutomationDesktopApp {
 
         // Single input functionality for all dropdowns (setup only, no data loading)
         this.setupSingleInputHandlers('region', 'regions', 'region_name', this.loadRegions.bind(this));
-        this.setupSingleInputHandlers('sport', 'sports', 'league', this.loadSports.bind(this));
+        // Sport uses modal/table instead of dropdown
+        this.setupSportModalHandlers();
         this.setupSingleInputHandlers('signal', 'signals', 'signal_name', this.loadSignals.bind(this));
         
         // Don't load social media platforms here - wait for login
@@ -549,9 +550,17 @@ class TestAutomationDesktopApp {
         // Show success
         this.showNotification(`${inputId} selected: ${text}`, 'success');
         
-        // Special handling for region -> load sports
+        // Special handling for region -> auto-show sport component
         if (inputId === 'region') {
-            this.loadSports(value, 1, '', true);
+            const sportComponent = document.getElementById('sport-selection-component');
+            if (sportComponent && value) {
+                // Auto-show sport component when region is selected
+                sportComponent.style.display = 'block';
+                this.currentSportRegionId = value;
+                this.currentSportPage = 1;
+                // Auto-load sports when region is selected
+                this.loadSportsTable(value, 1, '');
+            }
         }
     }
 
@@ -559,127 +568,122 @@ class TestAutomationDesktopApp {
         // Get all sport filter inputs
         const leagueInput = document.getElementById('sport-league');
         const matchNameInput = document.getElementById('sport-match-name');
-        const startTimeInput = document.getElementById('sport-start-time');
+        const startTimeDatePicker = document.getElementById('sport-start-time-date-picker');
+        const leagueDropdown = document.getElementById('league-dropdown');
+        const leagueOptionsContainer = document.getElementById('league-options');
         
-        const reloadSports = () => {
+        // Setup league dropdown handlers
+        if (leagueInput && leagueDropdown && leagueOptionsContainer) {
+            let leagueDebounceTimer = null;
+            let leagueCurrentPage = 1;
+            let leagueCurrentQuery = '';
+            let leagueHasMore = true;
+            
+            // Focus event - show dropdown and load leagues
+            leagueInput.addEventListener('focus', async () => {
+                if (leagueOptionsContainer.children.length === 0) {
+                    await this.loadLeagues(1, '', true);
+                }
+                leagueDropdown.classList.remove('hidden');
+            });
+            
+            // Input event - search leagues with debounce
+            leagueInput.addEventListener('input', (e) => {
+                const query = e.target.value.trim();
+                leagueCurrentQuery = query;
+                leagueCurrentPage = 1;
+                leagueHasMore = true;
+                
+                if (leagueDebounceTimer) {
+                    clearTimeout(leagueDebounceTimer);
+                }
+                
+                leagueDebounceTimer = setTimeout(async () => {
+                    await this.loadLeagues(1, query, true);
+                    leagueDropdown.classList.remove('hidden');
+                }, 300);
+            });
+            
+            // Keyboard navigation
+            leagueInput.addEventListener('keydown', (e) => {
+                const options = leagueOptionsContainer.querySelectorAll('.league-option');
+                let selectedIndex = Array.from(options).findIndex(opt => opt.classList.contains('selected'));
+                
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    selectedIndex = Math.min(selectedIndex + 1, options.length - 1);
+                    options.forEach((opt, idx) => {
+                        opt.classList.toggle('selected', idx === selectedIndex);
+                    });
+                    if (options[selectedIndex]) {
+                        options[selectedIndex].scrollIntoView({ block: 'nearest' });
+                    }
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    selectedIndex = Math.max(selectedIndex - 1, 0);
+                    options.forEach((opt, idx) => {
+                        opt.classList.toggle('selected', idx === selectedIndex);
+                    });
+                    if (options[selectedIndex]) {
+                        options[selectedIndex].scrollIntoView({ block: 'nearest' });
+                    }
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (selectedIndex >= 0 && options[selectedIndex]) {
+                        this.selectLeagueOption(options[selectedIndex]);
+                    }
+                } else if (e.key === 'Escape') {
+                    leagueDropdown.classList.add('hidden');
+                }
+            });
+            
+            // Hide dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!leagueInput.contains(e.target) && !leagueDropdown.contains(e.target)) {
+                    leagueDropdown.classList.add('hidden');
+                }
+            });
+        }
+        
+        // Debounce function for auto-loading sports
+        let debounceTimer = null;
+        const debounceDelay = 500; // 500ms delay
+        
+        const reloadSportsTable = () => {
             const regionInput = document.getElementById('region');
             const regionId = regionInput?.dataset.value;
             
             // Only reload if region is selected
             if (regionId) {
-                this.loadSports(regionId, 1, '', true);
-            }
-        };
-        
-        // Add event listeners for ENTER key and BLUR (click outside)
-        const filterInputs = [leagueInput, matchNameInput];
-        
-        filterInputs.forEach(input => {
-            if (input) {
-                // Reload on Enter key
-                input.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') {
-                        reloadSports();
-                    }
-                });
+                // Clear previous timer
+                if (debounceTimer) {
+                    clearTimeout(debounceTimer);
+                }
                 
-                // Reload when user clicks outside (blur)
-                input.addEventListener('blur', () => {
-                    reloadSports();
-                });
-            }
-        });
-        
-        // For start time inputs (date + hour + minute), reload on change
-        const startTimeDateInput = document.getElementById('sport-start-time-date');
-        const startTimeHourInput = document.getElementById('sport-start-time-hour');
-        const startTimeMinuteInput = document.getElementById('sport-start-time-minute');
-        
-        // Function to validate and format time inputs
-        const validateTimeInput = (input, max) => {
-            const value = parseInt(input.value, 10);
-            if (isNaN(value) || value < 0) {
-                input.value = '';
-            } else if (value > max) {
-                input.value = max;
-            } else {
-                // Pad with zero if needed
-                input.value = String(value).padStart(2, '0');
+                // Set new timer
+                debounceTimer = setTimeout(() => {
+                    this.loadSportsTable(regionId, 1, '');
+                }, debounceDelay);
             }
         };
         
-        if (startTimeDateInput) {
-            startTimeDateInput.addEventListener('change', () => {
-                const dateValue = startTimeDateInput.value;
-                if (dateValue) {
-                    // Auto-set hour and minute to 00:00 when date is selected
-                    if (startTimeHourInput && !startTimeHourInput.value) {
-                        startTimeHourInput.value = '00';
-                    }
-                    if (startTimeMinuteInput && !startTimeMinuteInput.value) {
-                        startTimeMinuteInput.value = '00';
-                    }
-                } else {
-                    // Clear hour and minute when date is cleared
-                    if (startTimeHourInput) {
-                        startTimeHourInput.value = '';
-                    }
-                    if (startTimeMinuteInput) {
-                        startTimeMinuteInput.value = '';
-                    }
+        // Auto-load sports when match name input changes
+        
+        // Auto-load sports when match name input changes
+        if (matchNameInput) {
+            matchNameInput.addEventListener('input', reloadSportsTable);
+            matchNameInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    if (debounceTimer) clearTimeout(debounceTimer);
+                    reloadSportsTable();
                 }
-                // Update visibility immediately
-                this.updateSportWeekInfoVisibility();
-                reloadSports();
-            });
-            // Also handle input event for immediate feedback when typing/clearing
-            startTimeDateInput.addEventListener('input', () => {
-                const dateValue = startTimeDateInput.value;
-                if (!dateValue) {
-                    // Clear hour and minute when date is cleared
-                    if (startTimeHourInput) {
-                        startTimeHourInput.value = '';
-                    }
-                    if (startTimeMinuteInput) {
-                        startTimeMinuteInput.value = '';
-                    }
-                }
-                this.updateSportWeekInfoVisibility();
             });
         }
         
-        if (startTimeHourInput) {
-            startTimeHourInput.addEventListener('input', (e) => {
-                validateTimeInput(e.target, 23);
-                // Update visibility immediately
-                this.updateSportWeekInfoVisibility();
-            });
-            startTimeHourInput.addEventListener('blur', (e) => {
-                validateTimeInput(e.target, 23);
-                if (e.target.value) {
-                    e.target.value = String(parseInt(e.target.value, 10)).padStart(2, '0');
-                }
-                // Update visibility immediately
-                this.updateSportWeekInfoVisibility();
-                reloadSports();
-            });
-        }
-        
-        if (startTimeMinuteInput) {
-            startTimeMinuteInput.addEventListener('input', (e) => {
-                validateTimeInput(e.target, 59);
-                // Update visibility immediately
-                this.updateSportWeekInfoVisibility();
-            });
-            startTimeMinuteInput.addEventListener('blur', (e) => {
-                validateTimeInput(e.target, 59);
-                if (e.target.value) {
-                    e.target.value = String(parseInt(e.target.value, 10)).padStart(2, '0');
-                }
-                // Update visibility immediately
-                this.updateSportWeekInfoVisibility();
-                reloadSports();
-            });
+        // Auto-load sports when date picker changes
+        if (startTimeDatePicker) {
+            startTimeDatePicker.addEventListener('change', reloadSportsTable);
+            startTimeDatePicker.addEventListener('input', reloadSportsTable);
         }
     }
 
@@ -740,14 +744,8 @@ class TestAutomationDesktopApp {
 
     updateSportWeekInfoVisibility() {
         // Check if start-time filter has any value
-        const startTimeDateInput = document.getElementById('sport-start-time-date');
-        const startTimeHourInput = document.getElementById('sport-start-time-hour');
-        const startTimeMinuteInput = document.getElementById('sport-start-time-minute');
-        
-        const hasDate = startTimeDateInput?.value;
-        const hasHour = startTimeHourInput?.value;
-        const hasMinute = startTimeMinuteInput?.value;
-        const hasFilter = hasDate || hasHour || hasMinute;
+        const startTimeDatePicker = document.getElementById('sport-start-time-date-picker');
+        const hasFilter = startTimeDatePicker?.value && startTimeDatePicker.value.trim() !== '';
         
         const weekInfoEl = document.getElementById('sport-week-info');
         if (weekInfoEl) {
@@ -1152,6 +1150,90 @@ class TestAutomationDesktopApp {
         }
     }
 
+    async loadLeagues(page = 1, query = '', isNewSearch = true) {
+        try {
+            const params = new URLSearchParams({
+                page: page.toString(),
+                page_size: '10'
+            });
+            
+            if (query) {
+                params.append('name', query);
+            }
+            
+            const response = await this.apiCallWithAuth('GET', `/leagues?${params}`);
+            const optionsContainer = document.getElementById('league-options');
+            
+            // Clear dropdown only for new search
+            if (isNewSearch) {
+                optionsContainer.innerHTML = '';
+            }
+            
+            if (response.data && response.data.length > 0) {
+                console.log('Loading leagues:', response.data);
+                response.data.forEach(league => {
+                    const option = document.createElement('div');
+                    option.className = 'league-option';
+                    option.dataset.value = league.id;
+                    option.textContent = league.name;
+                    
+                    option.addEventListener('click', () => {
+                        this.selectLeagueOption(option);
+                    });
+                    
+                    optionsContainer.appendChild(option);
+                });
+                
+                // Show dropdown after populating
+                document.getElementById('league-dropdown').classList.remove('hidden');
+                
+                // Check if there's more data
+                if (response.data.length < 10) {
+                    this.hasMoreLeagues = false;
+                } else {
+                    this.hasMoreLeagues = true;
+                }
+            } else if (isNewSearch) {
+                optionsContainer.innerHTML = '<div class="league-loading">No leagues found</div>';
+            }
+        } catch (error) {
+            console.error('Error loading leagues:', error);
+            if (isNewSearch) {
+                this.showNotification('Error loading leagues', 'error');
+            }
+        }
+    }
+
+    selectLeagueOption(option) {
+        const leagueInput = document.getElementById('sport-league');
+        const leagueDropdown = document.getElementById('league-dropdown');
+        
+        if (!leagueInput) {
+            console.error('League input element not found');
+            return;
+        }
+        
+        const leagueId = option.dataset.value;
+        const leagueName = option.textContent;
+        
+        // Set value and store ID
+        leagueInput.value = leagueName;
+        leagueInput.dataset.value = leagueId;
+        
+        // Hide dropdown
+        if (leagueDropdown) {
+            leagueDropdown.classList.add('hidden');
+        }
+        
+        // Reload sports table with league_id filter
+        const regionInput = document.getElementById('region');
+        const regionId = regionInput?.dataset.value;
+        
+        if (regionId) {
+            this.loadSportsTable(regionId, 1, '');
+        }
+    }
+
     async loadSignals(page = 1, query = '', isNewSearch = true) {
         try {
             const params = new URLSearchParams({
@@ -1204,6 +1286,360 @@ class TestAutomationDesktopApp {
         }
     }
 
+    setupSportModalHandlers() {
+        const sportInput = document.getElementById('sport');
+        const sportComponent = document.getElementById('sport-selection-component');
+        const sportTableBody = document.getElementById('sport-table-body');
+        const sportPrevBtn = document.getElementById('sport-prev-btn');
+        const sportNextBtn = document.getElementById('sport-next-btn');
+        const applyFiltersBtn = document.getElementById('apply-filters-btn');
+        const clearFiltersBtn = document.getElementById('clear-filters-btn');
+        const toggleFiltersBtn = document.getElementById('toggle-filters-btn');
+        const filtersContent = document.getElementById('sport-filters-content');
+        
+        // Track current page and region
+        this.currentSportPage = 1;
+        this.currentSportRegionId = null;
+        
+        // Sport input click - show component and load sports table
+        if (sportInput) {
+            sportInput.addEventListener('click', () => {
+                const regionInput = document.getElementById('region');
+                const regionId = regionInput?.dataset.value;
+                
+                if (!regionId) {
+                    this.showNotification('Please select a region first', 'warning');
+                    return;
+                }
+                
+                // Show component and load sports table
+                if (sportComponent) {
+                    sportComponent.style.display = 'block';
+                    this.currentSportRegionId = regionId;
+                    this.loadSportsTable(regionId, 1, '');
+                }
+            });
+        }
+        
+        // Hide filters by default
+        if (filtersContent) {
+            filtersContent.style.display = 'none';
+        }
+        if (toggleFiltersBtn) {
+            const toggleText = toggleFiltersBtn.querySelector('#toggle-filters-text');
+            if (toggleText) toggleText.textContent = 'Show Filters';
+        }
+        
+        // Apply Filters button
+        if (applyFiltersBtn) {
+            applyFiltersBtn.addEventListener('click', () => {
+                const regionInput = document.getElementById('region');
+                const regionId = regionInput?.dataset.value;
+                
+                if (!regionId) {
+                    this.showNotification('Please select a region first', 'warning');
+                    return;
+                }
+                
+                this.currentSportRegionId = regionId;
+                this.currentSportPage = 1;
+                this.loadSportsTable(regionId, 1, '');
+            });
+        }
+        
+        // Clear Filters button
+        if (clearFiltersBtn) {
+            clearFiltersBtn.addEventListener('click', () => {
+                const leagueInput = document.getElementById('sport-league');
+                if (leagueInput) {
+                    leagueInput.value = '';
+                    leagueInput.dataset.value = '';
+                }
+                document.getElementById('sport-match-name').value = '';
+                const datePicker = document.getElementById('sport-start-time-date-picker');
+                if (datePicker) datePicker.value = '';
+                
+                // Reload sports table after clearing
+                const regionInput = document.getElementById('region');
+                const regionId = regionInput?.dataset.value;
+                if (regionId) {
+                    this.loadSportsTable(regionId, 1, '');
+                }
+            });
+        }
+        
+        // Toggle Filters visibility
+        if (toggleFiltersBtn && filtersContent) {
+            let filtersVisible = true;
+            toggleFiltersBtn.addEventListener('click', () => {
+                filtersVisible = !filtersVisible;
+                filtersContent.style.display = filtersVisible ? 'block' : 'none';
+                toggleFiltersBtn.querySelector('#toggle-filters-text').textContent = 
+                    filtersVisible ? 'Hide Filters' : 'Show Filters';
+            });
+        }
+        
+        // Pagination
+        if (sportPrevBtn) {
+            sportPrevBtn.addEventListener('click', () => {
+                // Use prev_page from meta if available, otherwise decrement
+                if (this.sportPrevPage !== null && this.sportPrevPage !== undefined) {
+                    this.currentSportPage = this.sportPrevPage;
+                } else if (this.currentSportPage > 1) {
+                    this.currentSportPage--;
+                } else {
+                    return; // Already on first page
+                }
+                this.loadSportsTable(this.currentSportRegionId, this.currentSportPage, '');
+            });
+        }
+        
+        if (sportNextBtn) {
+            sportNextBtn.addEventListener('click', () => {
+                // Use next_page from meta if available, otherwise increment
+                if (this.sportNextPage !== null && this.sportNextPage !== undefined) {
+                    this.currentSportPage = this.sportNextPage;
+                } else {
+                    this.currentSportPage++;
+                }
+                this.loadSportsTable(this.currentSportRegionId, this.currentSportPage, '');
+            });
+        }
+    }
+
+    async loadSportsTable(regionId, page = 1, query = '') {
+        // Get table body first to show loading
+        const tableBody = document.getElementById('sport-table-body');
+        
+        if (!tableBody) {
+            console.error('sport-table-body element not found');
+            this.showNotification('Sport table not found. Please refresh the page.', 'error');
+            return;
+        }
+        
+        // Show loading indicator
+        tableBody.innerHTML = '<tr><td colspan="5" class="sport-table-loading">Loading sports...</td></tr>';
+        
+        try {
+            const params = new URLSearchParams({
+                page: page.toString(),
+                page_size: '10'
+            });
+            
+            if (regionId) {
+                params.append('region_id', regionId);
+            }
+            
+            // Get filter values
+            const leagueFilter = document.getElementById('sport-league')?.value.trim();
+            const matchNameFilter = document.getElementById('sport-match-name')?.value.trim();
+            const startTimeDatePicker = document.getElementById('sport-start-time-date-picker');
+            
+            // Get date value and default time to 00:00
+            let startTimeFilterValue = null;
+            const dateValue = startTimeDatePicker?.value; // YYYY-MM-DD format
+            
+            if (dateValue) {
+                // Always use 00:00 for time
+                startTimeFilterValue = `${dateValue} 00:00`;
+            }
+            
+            // Calculate week range
+            const weekRange = this.getWeekRange();
+            const weekStartTime = this.formatDateTime(weekRange.monday);
+            const weekEndTime = this.formatDateTime(weekRange.sunday);
+            
+            params.append('end_time', weekEndTime);
+            
+            if (startTimeFilterValue) {
+                params.append('start_time', startTimeFilterValue.replace('T', ' '));
+            } else {
+                params.append('start_time', weekStartTime);
+            }
+            
+            // Apply filters - use league_id if available, otherwise use league name
+            const leagueInput = document.getElementById('sport-league');
+            const leagueId = leagueInput?.dataset.value;
+            
+            if (leagueId) {
+                params.append('league_id', leagueId);
+            } else if (leagueFilter) {
+                params.append('league', leagueFilter);
+            } else if (query) {
+                params.append('league', query);
+            }
+            
+            if (matchNameFilter) {
+                params.append('match_name', matchNameFilter);
+            }
+            
+            // Add include parameter for nested league data
+            params.append('include', 'league');
+            
+            const sportsResponse = await this.apiCallWithAuth('GET', `/sports?${params}`);
+            
+            // Get all elements first and check if they exist
+            const sportPrevBtn = document.getElementById('sport-prev-btn');
+            const sportNextBtn = document.getElementById('sport-next-btn');
+            const sportPageInfo = document.getElementById('sport-page-info');
+            const sportPagination = document.getElementById('sport-pagination');
+            
+            // Check if table body exists - this is critical
+            if (!tableBody) {
+                console.error('sport-table-body element not found');
+                this.showNotification('Sport table not found. Please refresh the page.', 'error');
+                return;
+            }
+            
+            // Store meta for pagination
+            this.sportMeta = sportsResponse.meta || {};
+            
+            // Update current page from meta if available
+            if (this.sportMeta.page) {
+                this.currentSportPage = this.sportMeta.page;
+            }
+            
+            // Clear table - only if tableBody exists (already checked above)
+            if (tableBody) {
+                tableBody.innerHTML = '';
+            }
+            
+            if (sportsResponse.data && sportsResponse.data.length > 0) {
+                sportsResponse.data.forEach((sport, index) => {
+                    const row = document.createElement('tr');
+                    row.dataset.sportId = sport.id;
+                    
+                    // Format start_time
+                    let formattedStartTime = sport.start_time || '';
+                    if (formattedStartTime && /^\d{4}-\d{2}-\d{2}/.test(formattedStartTime)) {
+                        const dateParts = formattedStartTime.split(' ')[0].split('-');
+                        if (dateParts.length === 3) {
+                            formattedStartTime = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` +
+                                (formattedStartTime.length > 10 ? ' ' + formattedStartTime.slice(11, 16) : '');
+                        }
+                    }
+                    
+                    const rowNumber = (page - 1) * 10 + index + 1;
+                    
+                    row.innerHTML = `
+                        <td>${rowNumber}</td>
+                        <td><strong>${sport.league?.name || sport.league || '-'}</strong></td>
+                        <td>${sport.match_name || '-'}</td>
+                        <td>${formattedStartTime || '-'}</td>
+                        <td>
+                            <button class="btn btn-primary btn-sm" style="padding: 4px 12px; font-size: 12px;">
+                                Select
+                            </button>
+                        </td>
+                    `;
+                    
+                    // Select button click
+                    const selectBtn = row.querySelector('button');
+                    selectBtn.addEventListener('click', () => {
+                        this.selectSportFromTable(sport);
+                    });
+                    
+                    // Row click also selects
+                    row.addEventListener('click', (e) => {
+                        if (e.target.tagName !== 'BUTTON') {
+                            this.selectSportFromTable(sport);
+                        }
+                    });
+                    
+                    tableBody.appendChild(row);
+                });
+                
+                // Update pagination using meta from API
+                const meta = sportsResponse.meta || {};
+                const hasNext = meta.has_next !== undefined ? meta.has_next : (sportsResponse.data.length === 10);
+                const hasPrev = meta.has_prev !== undefined ? meta.has_prev : (page > 1);
+                const totalPages = meta.total_pages || 1;
+                const totalItems = meta.total_items || sportsResponse.data.length;
+                const currentPage = meta.page || page;
+                
+                // Store next/prev page numbers for use in event handlers
+                this.sportNextPage = meta.next_page;
+                this.sportPrevPage = meta.prev_page;
+                
+                if (sportPrevBtn) sportPrevBtn.disabled = !hasPrev;
+                if (sportNextBtn) sportNextBtn.disabled = !hasNext;
+                if (sportPageInfo) {
+                    sportPageInfo.textContent = `Page ${currentPage} of ${totalPages} (${totalItems} total)`;
+                }
+                if (sportPagination) sportPagination.style.display = 'flex';
+            } else {
+                // Check tableBody exists before setting innerHTML
+                if (tableBody) {
+                    tableBody.innerHTML = `
+                        <tr>
+                            <td colspan="5" style="text-align: center; padding: 20px; color: #6c757d;">
+                                No sports found
+                            </td>
+                        </tr>
+                    `;
+                }
+                if (sportPagination) sportPagination.style.display = 'none';
+            }
+        } catch (error) {
+            const tableBody = document.getElementById('sport-table-body');
+            if (tableBody) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 20px; color: #dc3545;">
+                            Error loading sports: ${error.message}
+                        </td>
+                    </tr>
+                `;
+            } else {
+                console.error('sport-table-body element not found in error handler');
+            }
+            this.showNotification('Failed to load sports: ' + error.message, 'error');
+        }
+    }
+
+    selectSportFromTable(sport) {
+        const sportInput = document.getElementById('sport');
+        const sportComponent = document.getElementById('sport-selection-component');
+        
+        // Check if sportInput exists
+        if (!sportInput) {
+            console.error('Sport input element not found');
+            this.showNotification('Sport input not found. Please refresh the page.', 'error');
+            return;
+        }
+        
+        // Format display text
+        let formattedStartTime = sport.start_time || '';
+        if (formattedStartTime && /^\d{4}-\d{2}-\d{2}/.test(formattedStartTime)) {
+            const dateParts = formattedStartTime.split(' ')[0].split('-');
+            if (dateParts.length === 3) {
+                formattedStartTime = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` +
+                    (formattedStartTime.length > 10 ? ' ' + formattedStartTime.slice(11, 16) : '');
+            }
+        }
+        
+        const leagueName = sport.league?.name || sport.league;
+        const displayText = `${leagueName} - ${formattedStartTime} - ${sport.match_name}`;
+        
+        // Set value
+        sportInput.value = displayText;
+        sportInput.dataset.value = sport.id;
+        
+        // Parse and store sport data
+        this.parseAndStoreSportData(displayText);
+        
+        // Hide component
+        if (sportComponent) {
+            sportComponent.style.display = 'none';
+        }
+        
+        // Trigger change event
+        const changeEvent = new Event('change', { bubbles: true });
+        sportInput.dispatchEvent(changeEvent);
+        
+        this.showNotification(`Sport selected: ${leagueName}`, 'success');
+    }
+
     async loadSports(regionId, page = 1, query = '', isNewSearch = true) {
         try {
             const params = new URLSearchParams({
@@ -1218,38 +1654,15 @@ class TestAutomationDesktopApp {
             // Get filter values from inputs
             const leagueFilter = document.getElementById('sport-league')?.value.trim();
             const matchNameFilter = document.getElementById('sport-match-name')?.value.trim();
-            const startTimeDateInput = document.getElementById('sport-start-time-date');
-            const startTimeHourInput = document.getElementById('sport-start-time-hour');
-            const startTimeMinuteInput = document.getElementById('sport-start-time-minute');
+            const startTimeDatePicker = document.getElementById('sport-start-time-date-picker');
             
-            // Combine date and time inputs to yyyy-mm-dd HH:mm format (24-hour only)
+            // Get date value and default time to 00:00
             let startTimeFilterValue = null;
-            const dateValue = startTimeDateInput?.value; // yyyy-mm-dd format
-            const hourValue = startTimeHourInput?.value ? String(parseInt(startTimeHourInput.value, 10)).padStart(2, '0') : null;
-            const minuteValue = startTimeMinuteInput?.value ? String(parseInt(startTimeMinuteInput.value, 10)).padStart(2, '0') : null;
+            const dateValue = startTimeDatePicker?.value; // YYYY-MM-DD format
             
             if (dateValue) {
-                if (hourValue !== null && minuteValue !== null) {
-                    // Date + hour + minute all provided
-                    startTimeFilterValue = `${dateValue} ${hourValue}:${minuteValue}`;
-                } else if (hourValue !== null) {
-                    // Date + hour only, use 00 for minutes
-                    startTimeFilterValue = `${dateValue} ${hourValue}:00`;
-                } else if (minuteValue !== null) {
-                    // Date + minute only, use 00 for hours
-                    startTimeFilterValue = `${dateValue} 00:${minuteValue}`;
-                } else {
-                    // Only date, use 00:00 as default time
-                    startTimeFilterValue = `${dateValue} 00:00`;
-                }
-            } else if (hourValue !== null || minuteValue !== null) {
-                // Only time selected, use today's date
-                const today = new Date();
-                const year = today.getFullYear();
-                const month = String(today.getMonth() + 1).padStart(2, '0');
-                const day = String(today.getDate()).padStart(2, '0');
-                const timeStr = `${hourValue || '00'}:${minuteValue || '00'}`;
-                startTimeFilterValue = `${year}-${month}-${day} ${timeStr}`;
+                // Always use 00:00 for time
+                startTimeFilterValue = `${dateValue} 00:00`;
             }
             
             // ALWAYS calculate current week range (Monday to Sunday) for sports loading
@@ -1263,17 +1676,15 @@ class TestAutomationDesktopApp {
             // If user provided start time filter, use it (for exact time filtering)
             // Otherwise, use week start time (Monday 00:00)
             if (startTimeFilterValue) {
-                // Convert datetime-local format (yyyy-mm-ddTHH:mm) to API format (yyyy-mm-dd HH:mm)
-                const apiStartTime = startTimeFilterValue.replace('T', ' ');
-                params.append('start_time', apiStartTime);
-                console.log('📅 Using user filter start_time:', apiStartTime);
+                params.append('start_time', startTimeFilterValue);
+                console.log('📅 Using user filter start_time:', startTimeFilterValue);
             } else {
                 // Use week start time (Monday 00:00)
                 params.append('start_time', weekStartTime);
             }
             
             console.log('📅 Auto-calculated week range (current week):', {
-                start_time: startTimeFilterValue ? startTimeFilterValue.replace('T', ' ') : weekStartTime,
+                start_time: startTimeFilterValue || weekStartTime,
                 end_time: weekEndTime,
                 monday: weekRange.monday.toLocaleDateString(),
                 sunday: weekRange.sunday.toLocaleDateString()
@@ -1283,8 +1694,13 @@ class TestAutomationDesktopApp {
             // Always check visibility based on current filter state
             this.updateSportWeekInfoVisibility();
             
-            // Apply filters (if provided, they override the search query)
-            if (leagueFilter) {
+            // Apply filters - use league_id if available, otherwise use league name
+            const leagueInput = document.getElementById('sport-league');
+            const leagueId = leagueInput?.dataset.value;
+            
+            if (leagueId) {
+                params.append('league_id', leagueId);
+            } else if (leagueFilter) {
                 params.append('league', leagueFilter);
             } else if (query) {
                 // Use search query only if no league filter
@@ -1294,6 +1710,9 @@ class TestAutomationDesktopApp {
             if (matchNameFilter) {
                 params.append('match_name', matchNameFilter);
             }
+            
+            // Add include parameter for nested league data
+            params.append('include', 'league');
             
             const sportsResponse = await this.apiCallWithAuth('GET', `/sports?${params}`);
             const optionsContainer = document.getElementById('sport-options');
@@ -1326,7 +1745,8 @@ class TestAutomationDesktopApp {
                     }
 
                     // Highlight important info: start time (bold), league (bold), match name (bold)
-                    option.innerHTML = `<b>${sport.league}</b> - <b>${formattedStartTime}</b> - <b>${sport.match_name}</b>`;
+                    const leagueName = sport.league?.name || sport.league;
+                    option.innerHTML = `<b>${leagueName}</b> - <b>${formattedStartTime}</b> - <b>${sport.match_name}</b>`;
                     
                     option.addEventListener('click', () => {
                         this.selectOption(option, 'sport');

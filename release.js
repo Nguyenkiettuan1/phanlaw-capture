@@ -186,12 +186,18 @@ function performRelease(pkg, oldVersion, newVersion) {
             // Step 7: Create GitHub Release
             log('\n📝 Step 7: Creating GitHub Release...', 'cyan');
             
+            // Escape file paths with quotes for PowerShell/Windows
+            const exePath = path.join(distDir, exeFile);
+            const blockmapPath = path.join(distDir, blockmapFile);
+            const ymlPath = path.join(distDir, ymlFile);
+            
+            // Use quotes around file paths to handle spaces
             const releaseCmd = `gh release create v${newVersion} ` +
-                `dist/${exeFile} ` +
-                `dist/${blockmapFile} ` +
-                `dist/${ymlFile} ` +
+                `"${exePath}" ` +
+                `"${blockmapPath}" ` +
+                `"${ymlPath}" ` +
                 `--title "Version ${newVersion}" ` +
-                `--notes "${releaseNotes}"`;
+                `--notes "${releaseNotes.replace(/"/g, '\\"')}"`;
             
             try {
                 exec(releaseCmd);
