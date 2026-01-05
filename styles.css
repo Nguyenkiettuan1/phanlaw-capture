@@ -848,6 +848,71 @@ input[type="time"]::-webkit-calendar-picker-indicator {
     margin-left: 10px;
 }
 
+/* URL Duplicate Warning */
+.url-duplicate-warning {
+    margin-top: 10px;
+    padding: 12px 15px;
+    background: #fff3cd;
+    border: 2px solid #ffc107;
+    border-radius: 8px;
+    animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.url-warning-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.url-warning-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.url-warning-text {
+    flex: 1;
+    color: #856404;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.url-warning-text strong {
+    color: #856404;
+    font-weight: 600;
+}
+
+.url-warning-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: #856404;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    flex-shrink: 0;
+    transition: background-color 0.2s;
+}
+
+.url-warning-close:hover {
+    background-color: rgba(133, 100, 4, 0.1);
+}
+
 
 /* Responsive Design */
 /* For screens smaller than 1920x1080 (e.g., 1366x768, 1280x720, etc.) */

@@ -116,6 +116,19 @@ class UiService {
         const notification = document.getElementById('notification');
         const text = document.getElementById('notification-text');
         
+        // If notification is already visible and not an error, hide it first to prevent overlapping
+        if (!notification.classList.contains('hidden') && type !== 'error') {
+            // Hide current notification immediately
+            notification.classList.add('hidden');
+            // Clear any existing timeout
+            if (this.notificationTimeout) {
+                clearTimeout(this.notificationTimeout);
+                this.notificationTimeout = null;
+            }
+            // Small delay to ensure smooth transition
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
         // Add to history
         this.notificationHistory.push({
             message,

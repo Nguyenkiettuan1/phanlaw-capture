@@ -19,6 +19,11 @@ class TestAutomationDesktopApp {
         this.currentLeague = null;
         this.currentMatchName = null;
         
+        // URL duplicate warning state
+        this.urlWarningElement = null;
+        this.currentWarnedUrl = null;
+        this.urlCheckDebounce = null;
+        
         // Initialize services
         this.uiService = new UiService();
         this.sessionService = new SessionService();
@@ -87,6 +92,15 @@ class TestAutomationDesktopApp {
         // Detect URL from clipboard
         document.getElementById('detect-clipboard-btn').addEventListener('click', () => {
             this.detectUrlFromClipboard();
+        });
+
+        // Monitor URL input changes for duplicate checking
+        const urlInput = document.getElementById('url');
+        urlInput.addEventListener('input', () => {
+            this.handleUrlChange();
+        });
+        urlInput.addEventListener('change', () => {
+            this.handleUrlChange();
         });
 
         // Single input functionality for all dropdowns (setup only, no data loading)
@@ -2359,6 +2373,8 @@ class TestAutomationDesktopApp {
             if (result.success && result.url) {
                 document.getElementById('url').value = result.url;
                 this.showNotification('URL detected from clipboard!', 'success');
+                // Check for duplicate URL and show warning
+                this.checkUrlExistsAndWarn(result.url);
             } else {
                 this.showNotification('No URL found in clipboard. Please copy a URL first.', 'error');
             }
@@ -2735,12 +2751,124 @@ class TestAutomationDesktopApp {
             });
         }
         
-        // URL check will be done only when creating detected link (during upload)
-        // No need to check here to avoid spam requests
+        // Check for duplicate URL and show warning
+        this.checkUrlExistsAndWarn(url);
+        
+        // Check for duplicate URL and show warning
+        this.checkUrlExistsAndWarn(url);
     }
 
     showScreenshotPopup(data) {
         this.uiService.showScreenshotPopup(data);
+    }
+
+    handleUrlChange() {
+        const url = document.getElementById('url').value.trim();
+        
+        // Hide warning if URL changed to different URL
+        if (this.currentWarnedUrl && url !== this.currentWarnedUrl) {
+            this.hideUrlWarning();
+        }
+        
+        // Debounce URL check to avoid too many API calls
+        if (this.urlCheckDebounce) {
+            clearTimeout(this.urlCheckDebounce);
+        }
+        
+        // Only check if URL is valid and session is active
+        if (url && url.startsWith('http')) {
+            this.urlCheckDebounce = setTimeout(() => {
+                this.checkUrlExistsAndWarn(url);
+            }, 500); // 500ms debounce
+        } else if (!url) {
+            // URL is empty, hide warning
+            this.hideUrlWarning();
+        }
+    }
+
+    hideUrlWarning() {
+        if (this.urlWarningElement && this.urlWarningElement.parentNode) {
+            this.urlWarningElement.remove();
+            this.urlWarningElement = null;
+        }
+        this.currentWarnedUrl = null;
+    }
+
+    async checkUrlExistsAndWarn(url) {
+        // Only check if session is active and has sportId
+        const sessionData = this.sessionService.getSessionData();
+        if (!sessionData || !sessionData.sportId) {
+            // No active session, don't check
+            return;
+        }
+        
+        // Don't check if URL is empty or invalid
+        if (!url || !url.startsWith('http')) {
+            return;
+        }
+        
+        // If this is the same URL we already warned about, don't check again
+        if (this.currentWarnedUrl === url) {
+            return;
+        }
+        
+        try {
+            const { ipcRenderer } = require('electron');
+            const urlCheckResult = await ipcRenderer.invoke('check-url-exists', { 
+                url, 
+                sportId: sessionData.sportId 
+            });
+            
+            if (urlCheckResult.success && urlCheckResult.exists) {
+                // URL exists, show warning
+                this.showUrlWarning(url);
+            } else {
+                // URL doesn't exist or check failed, hide warning if showing
+                if (this.currentWarnedUrl === url) {
+                    this.hideUrlWarning();
+                }
+            }
+        } catch (error) {
+            console.error('Error checking URL exists:', error);
+            // On error, don't show warning (better to not warn than to warn incorrectly)
+        }
+    }
+
+    showUrlWarning(url) {
+        // Hide existing warning if any
+        this.hideUrlWarning();
+        
+        // Store the URL we're warning about
+        this.currentWarnedUrl = url;
+        
+        // Create warning element
+        const warning = document.createElement('div');
+        warning.id = 'url-duplicate-warning';
+        warning.className = 'url-duplicate-warning';
+        warning.innerHTML = `
+            <div class="url-warning-content">
+                <span class="url-warning-icon">⚠️</span>
+                <span class="url-warning-text">
+                    <strong>URL đã tồn tại!</strong> Link này đã được chụp trước đó. 
+                    Nếu bạn chuyển sang link khác, thông báo này sẽ tự động biến mất.
+                </span>
+                <button class="url-warning-close" title="Đóng">✖</button>
+            </div>
+        `;
+        
+        // Add close button handler
+        const closeBtn = warning.querySelector('.url-warning-close');
+        closeBtn.addEventListener('click', () => {
+            this.hideUrlWarning();
+        });
+        
+        // Insert warning after URL input field
+        const urlInput = document.getElementById('url');
+        const urlContainer = urlInput.closest('.form-group');
+        if (urlContainer) {
+            urlContainer.appendChild(warning);
+            this.urlWarningElement = warning;
+        }
     }
 
     hideScreenshotPopup() {
@@ -2827,7 +2955,9 @@ class TestAutomationDesktopApp {
         console.log('Main page URL:', document.getElementById('url').value);
         
         const signalInput = document.getElementById('popup-signal');
-        const selectedSignal = signalInput.dataset.value || signalInput.value;
+        let selectedSignal = signalInput.dataset.value; // Get signal ID if exists
+        const signalName = signalInput.value.trim(); // Get typed signal name
+        
         // Use main page URL instead of screenshotData.url
         const url = document.getElementById('url').value;
         const bucketName = document.getElementById('bucket-name').value;
@@ -2852,7 +2982,8 @@ class TestAutomationDesktopApp {
 
         console.log('URL check:', url);
         console.log('Bucket name:', bucketName);
-        console.log('Selected signal:', selectedSignal);
+        console.log('Selected signal ID:', selectedSignal);
+        console.log('Signal name:', signalName);
         console.log('Social Media Type:', socialMediaType);
         console.log('Is Facebook:', isFacebook);
         console.log('View:', view);
@@ -2865,13 +2996,53 @@ class TestAutomationDesktopApp {
 
         if (!bucketName) {
             this.showNotification('Please enter storage folder name', 'error');
+            return;
+        }
+
+        // If no signal ID selected but signal name exists, try to find or create signal
+        if (!selectedSignal && signalName) {
+            console.log('⚠️ No signal ID found, checking if signal exists or creating new one...');
+            try {
+                // First, try to find the signal by name
+                const { ipcRenderer } = require('electron');
+                const searchResult = await this.apiCallWithAuth('GET', `/signals?signal_name=${encodeURIComponent(signalName)}&page_size=1`);
+                
+                if (searchResult.data && searchResult.data.length > 0) {
+                    // Signal exists, use its ID
+                    selectedSignal = searchResult.data[0].id;
+                    signalInput.dataset.value = selectedSignal;
+                    console.log('✅ Found existing signal:', selectedSignal);
+                } else {
+                    // Signal doesn't exist, create it automatically
+                    console.log('📝 Signal not found, creating new signal:', signalName);
+                    this.showNotification(`Creating new signal "${signalName}"...`, 'info');
+                    
+                    const createResult = await ipcRenderer.invoke('create-signal', {
+                        signal_name: signalName
+                    });
+                    
+                    if (createResult.success) {
+                        selectedSignal = createResult.data.id;
+                        signalInput.dataset.value = selectedSignal;
+                        signalInput.value = createResult.data.signal_name;
+                        console.log('✅ Created new signal:', selectedSignal);
+                        this.showNotification(`Signal "${signalName}" created successfully!`, 'success');
+                    } else {
+                        this.showNotification('Failed to create signal: ' + createResult.error, 'error');
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking/creating signal:', error);
+                this.showNotification('Error checking signal: ' + error.message, 'error');
                 return;
+            }
         }
 
         if (!selectedSignal) {
-            this.showNotification('Please select a signal', 'error');
-                return;
-            }
+            this.showNotification('Please select or enter a signal name', 'error');
+            return;
+        }
 
         // Validate view for facebook platform
         if (isFacebook && !view) {
@@ -2881,8 +3052,6 @@ class TestAutomationDesktopApp {
         }
             
         // QUEUE UPLOAD (background processing) - immediate feedback
-        const signalName = document.getElementById('popup-signal').value;
-        
         // Use current URL from input field (most up-to-date)
         const currentUrl = document.getElementById('url').value;
         console.log('📤 Adding to queue with URL (popup):', currentUrl);
