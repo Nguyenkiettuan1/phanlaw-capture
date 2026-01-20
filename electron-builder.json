@@ -22,7 +22,19 @@
         "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "mac": {
-        "target": "dmg"
+        "target": [
+            {
+                "target": "dmg",
+                "arch": [
+                    "x64",
+                    "arm64"
+                ]
+            }
+        ],
+        "category": "public.app-category.utilities",
+        "icon": "assets/icon.icns",
+        "hardenedRuntime": false,
+        "gatekeeperAssess": false
     },
     "linux": {
         "target": "AppImage"

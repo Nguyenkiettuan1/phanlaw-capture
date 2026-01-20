@@ -41,7 +41,9 @@ class TestAutomationApp {
                 contextIsolation: false,
                 enableRemoteModule: true
             },
-            icon: path.join(__dirname, 'assets/icon.png'),
+            icon: process.platform === 'darwin' 
+                ? path.join(__dirname, 'assets/icon.icns')
+                : path.join(__dirname, 'assets/icon.ico'),
             titleBarStyle: 'default',
             show: false,
             frame: true,
@@ -101,8 +103,19 @@ class TestAutomationApp {
         try {
             console.log('🔍 Creating system tray...');
             
-            // Simple: Just load icon.ico
-            const iconPath = path.join(__dirname, 'assets/icon.ico');
+            // Load platform-specific icon
+            let iconPath;
+            if (process.platform === 'darwin') {
+                // macOS uses .icns format
+                iconPath = path.join(__dirname, 'assets/icon.icns');
+                // Fallback to .ico if .icns doesn't exist
+                if (!require('fs').existsSync(iconPath)) {
+                    iconPath = path.join(__dirname, 'assets/icon.ico');
+                }
+            } else {
+                // Windows uses .ico format
+                iconPath = path.join(__dirname, 'assets/icon.ico');
+            }
             console.log('Loading icon from:', iconPath);
             
             const trayIcon = nativeImage.createFromPath(iconPath);
@@ -157,10 +170,18 @@ class TestAutomationApp {
                 this.mainWindow.focus();
             });
             
-            // Single click to show menu (Windows behavior)
-            this.tray.on('click', () => {
-                this.tray.popUpContextMenu();
-            });
+            // Single click behavior: Windows shows menu, macOS shows window
+            if (process.platform === 'win32') {
+                this.tray.on('click', () => {
+                    this.tray.popUpContextMenu();
+                });
+            } else if (process.platform === 'darwin') {
+                // macOS: single click shows window, double click also works
+                this.tray.on('click', () => {
+                    this.mainWindow.show();
+                    this.mainWindow.focus();
+                });
+            }
             
             console.log('✅ System tray ready!');
         } catch (error) {
@@ -541,6 +562,19 @@ class TestAutomationApp {
             
             // Set URL in screenshot service
             this.screenshotService.setCurrentUrl(currentUrl);
+            
+            // Set session data in screenshot service for filename generation
+            const sessionData = this.getCurrentSessionData();
+            if (sessionData) {
+                this.screenshotService.setSessionData(sessionData);
+                console.log('✅ Session data set in screenshot service:', {
+                    regionName: sessionData.regionName,
+                    league: sessionData.league,
+                    matchName: sessionData.matchName
+                });
+            } else {
+                console.log('⚠️ No session data available for filename generation');
+            }
             
             // Capture screenshot using service
             const screenshotResult = await this.screenshotService.captureScreenshot();

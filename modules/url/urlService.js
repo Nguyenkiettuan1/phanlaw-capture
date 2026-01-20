@@ -1,6 +1,7 @@
 // URL Service Module - Handles URL detection and management
 const { clipboard } = require('electron');
 const { exec } = require('child_process');
+const os = require('os');
 
 class UrlService {
     constructor() {
@@ -33,6 +34,25 @@ class UrlService {
     }
 
     async detectUrlFromBrowser() {
+        try {
+            if (process.platform === 'win32') {
+                // Windows: Use PowerShell
+                return await this.detectUrlFromBrowserWindows();
+            } else if (process.platform === 'darwin') {
+                // macOS: Use AppleScript
+                return await this.detectUrlFromBrowserMacOS();
+            } else {
+                // Linux: Not implemented yet
+                console.log('Browser detection not implemented for this platform');
+                return null;
+            }
+        } catch (error) {
+            console.error('Browser detection failed:', error);
+            return null;
+        }
+    }
+
+    async detectUrlFromBrowserWindows() {
         try {
             const powershellScript = `
                 Add-Type -AssemblyName System.Windows.Forms
@@ -82,9 +102,108 @@ class UrlService {
             });
             
         } catch (error) {
-            console.error('Browser detection failed:', error);
+            console.error('Windows browser detection failed:', error);
             return null;
         }
+    }
+
+    async detectUrlFromBrowserMacOS() {
+        try {
+            // macOS: Use AppleScript to get URL from active browser
+            // Try each browser one by one
+            const browsers = [
+                {
+                    name: 'Google Chrome',
+                    script: 'tell application "Google Chrome" to get URL of active tab of front window'
+                },
+                {
+                    name: 'Safari',
+                    script: 'tell application "Safari" to get URL of front document'
+                },
+                {
+                    name: 'Microsoft Edge',
+                    script: 'tell application "Microsoft Edge" to get URL of active tab of front window'
+                },
+                {
+                    name: 'Firefox',
+                    script: null // Firefox requires different approach
+                }
+            ];
+            
+            // Try Chrome, Safari, Edge first (direct AppleScript)
+            for (const browser of browsers) {
+                if (browser.script) {
+                    try {
+                        const url = await this.executeAppleScript(browser.script);
+                        if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+                            console.log(`URL detected from ${browser.name}:`, url);
+                            return url;
+                        }
+                    } catch (error) {
+                        // Browser not running or not available, try next
+                        continue;
+                    }
+                }
+            }
+            
+            // Firefox: Use clipboard method (Cmd+L, Cmd+C, then read clipboard)
+            try {
+                const fs = require('fs');
+                const tempScript = require('path').join(require('os').tmpdir(), 'get_firefox_url.scpt');
+                const firefoxScript = `
+                    tell application "System Events"
+                        tell process "Firefox"
+                            if frontmost is true then
+                                keystroke "l" using command down
+                                delay 0.2
+                                keystroke "c" using command down
+                                delay 0.2
+                            end if
+                        end tell
+                    end tell
+                `;
+                
+                fs.writeFileSync(tempScript, firefoxScript);
+                await this.executeAppleScript(`run script file "${tempScript}"`);
+                fs.unlinkSync(tempScript);
+                
+                // Read from clipboard
+                await new Promise(resolve => setTimeout(resolve, 300));
+                const clipboardUrl = await this.detectUrlFromClipboard();
+                if (clipboardUrl) {
+                    return clipboardUrl;
+                }
+            } catch (error) {
+                // Firefox method failed
+                console.log('Firefox URL detection failed:', error.message);
+            }
+            
+            return null;
+            
+        } catch (error) {
+            console.error('macOS browser detection failed:', error);
+            return null;
+        }
+    }
+
+    async executeAppleScript(script) {
+        return new Promise((resolve, reject) => {
+            // Use osascript with proper escaping
+            const escapedScript = script.replace(/"/g, '\\"');
+            exec(`osascript -e "${escapedScript}"`, (error, stdout, stderr) => {
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                const result = stdout.trim();
+                // Remove any error messages that might be in output
+                if (result.includes('error:') || result.includes('execution error')) {
+                    reject(new Error(result));
+                    return;
+                }
+                resolve(result);
+            });
+        });
     }
 
     async getUrlFromBrowserViaPowerShell() {
@@ -164,7 +283,7 @@ class UrlService {
                 return clipboardUrl;
             }
             
-            // Method 2: Try to detect browser window and get URL using Windows API
+            // Method 2: Try to detect browser window and get URL using platform-specific API
             try {
                 const browserUrl = await this.detectUrlFromBrowser();
                 if (browserUrl) {

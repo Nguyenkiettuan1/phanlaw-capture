@@ -10,6 +10,9 @@
     "dist": "electron-builder --publish=never",
     "build-win": "electron-builder --win",
     "build-win-portable": "electron-builder --win portable",
+    "build-mac": "electron-builder --mac",
+    "build-mac-dmg": "electron-builder --mac dmg",
+    "build-all": "electron-builder --win --mac",
     "build-simple": "electron-builder --win --config.directories.output=dist --config.win.target=portable --config.win.sign=null",
     "pack": "electron-packager . --platform=win32 --arch=x64 --out=dist --overwrite",
     "pack-portable": "electron-packager . --platform=win32 --arch=x64 --out=dist --overwrite --asar",
@@ -89,7 +92,21 @@
       "certificatePassword": null
     },
     "mac": {
-      "target": "dmg"
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.utilities",
+      "icon": "assets/icon.icns",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "entitlements": null,
+      "entitlementsInherit": null
     },
     "linux": {
       "target": "AppImage"

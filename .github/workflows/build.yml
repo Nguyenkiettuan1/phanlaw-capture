@@ -12,7 +12,7 @@ jobs:
     
     strategy:
       matrix:
-        os: [windows-latest]
+        os: [windows-latest, macos-latest]
         
     steps:
     - name: Checkout code
@@ -27,33 +27,44 @@ jobs:
     - name: Install dependencies
       run: npm ci
       
-    - name: Create assets directory
-      run: mkdir -p assets
-      
-    - name: Create placeholder icon
+    - name: Preflight (macOS icon required)
+      if: matrix.os == 'macos-latest'
+      shell: bash
       run: |
-        # Tạo icon placeholder (bạn cần thay thế bằng icon thật)
-        echo "Creating placeholder icon..."
-        # Tạo file icon đơn giản (cần thay thế bằng icon thật)
-        
-    - name: Build Windows
+        if [ ! -f "assets/icon.icns" ]; then
+          echo "::error::Missing assets/icon.icns. macOS build requires an .icns icon. Please add assets/icon.icns (see MACOS_SETUP.md)."
+          exit 1
+        fi
+
+    - name: Build Windows (no publish)
       if: matrix.os == 'windows-latest'
       run: npm run dist
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build macOS (no publish)
+      if: matrix.os == 'macos-latest'
+      shell: bash
+      run: npx electron-builder --mac --publish=never
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
-    - name: Upload Windows artifacts
-      if: matrix.os == 'windows-latest'
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: windows-build
+        name: ${{ matrix.os }}-dist
         path: dist/
         
-    - name: Create Release
+    - name: Create/Update GitHub Release (attach artifacts)
       if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
-        files: dist/*.exe
+        files: |
+          dist/*.exe
+          dist/*.dmg
+          dist/*.zip
+          dist/*.yml
+          dist/*.blockmap
         draft: false
         prerelease: false
       env:

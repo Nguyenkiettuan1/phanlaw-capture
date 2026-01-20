@@ -1639,7 +1639,16 @@ class TestAutomationDesktopApp {
         sportInput.value = displayText;
         sportInput.dataset.value = sport.id;
         
-        // Parse and store sport data
+        // Store league and match name directly from sport object
+        this.currentLeague = leagueName || '';
+        this.currentMatchName = sport.match_name || '';
+        
+        console.log('✅ Stored sport data:', {
+            league: this.currentLeague,
+            matchName: this.currentMatchName
+        });
+        
+        // Also parse for backward compatibility
         this.parseAndStoreSportData(displayText);
         
         // Hide component
@@ -2185,10 +2194,17 @@ class TestAutomationDesktopApp {
             // Get sport name for session - use stored data or parsed data
             const sportNameForSession = sportInfo || sportValue;
             
+            // Get league and match name for filename
+            const league = this.currentLeague || '';
+            const matchName = this.currentMatchName || '';
+            
             console.log('DEBUG: sportName extracted:', sportNameForSession);
+            console.log('DEBUG: regionName:', regionName);
+            console.log('DEBUG: league:', league);
+            console.log('DEBUG: matchName:', matchName);
             
             // Use session service to start session (with social_media_type_id and type)
-            const result = this.sessionService.startSession(regionId, sportId, sportNameForSession, socialMediaTypeId, socialMediaType);
+            const result = this.sessionService.startSession(regionId, sportId, sportNameForSession, socialMediaTypeId, socialMediaType, regionName, league, matchName);
             
             if (result.success) {
                 // Highlight selected fields to show active session parameters

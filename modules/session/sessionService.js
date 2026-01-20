@@ -12,8 +12,8 @@ class SessionService {
     getCurrentUser() {
         return this.currentUser;
     }
-
-    startSession(regionId, sportId, sportName, socialMediaTypeId, socialMediaType) {
+    
+    startSession(regionId, sportId, sportName, socialMediaTypeId, socialMediaType, regionName = null, league = null, matchName = null) {
         try {
             // Lock UI state (no API call needed)
             this.currentSession = { 
@@ -21,7 +21,10 @@ class SessionService {
                 sportId, 
                 sportName, 
                 socialMediaTypeId,
-                socialMediaType // Store type to check if it's facebook
+                socialMediaType, // Store type to check if it's facebook
+                regionName, // Store region name for filename
+                league, // Store league for filename
+                matchName // Store match name for filename
             };
             
             // Disable region, sport, and social media radio buttons
@@ -103,7 +106,10 @@ class SessionService {
             sportName: this.currentSession.sportName,
             socialMediaTypeId: this.currentSession.socialMediaTypeId,
             socialMediaType: this.currentSession.socialMediaType,
-            userId: this.currentUser?.id
+            userId: this.currentUser?.id,
+            regionName: this.currentSession.regionName,
+            league: this.currentSession.league,
+            matchName: this.currentSession.matchName
         };
     }
 

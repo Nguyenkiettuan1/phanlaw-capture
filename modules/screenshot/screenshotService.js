@@ -9,6 +9,7 @@ class ScreenshotService {
         this.currentUrl = null;
         this.currentUser = null;
         this.preloadedSources = null;
+        this.sessionData = null;
     }
 
     setCurrentUser(user) {
@@ -17,6 +18,10 @@ class ScreenshotService {
 
     setCurrentUrl(url) {
         this.currentUrl = url;
+    }
+
+    setSessionData(sessionData) {
+        this.sessionData = sessionData;
     }
 
     extractDomainFromUrl(url) {
@@ -44,6 +49,18 @@ class ScreenshotService {
             console.error('Error extracting domain:', error);
             return 'unknown';
         }
+    }
+
+    sanitizeFilename(str) {
+        if (!str) return 'unknown';
+        
+        // Replace invalid filename characters with underscores
+        return str
+            .replace(/[<>:"/\\|?*]/g, '_') // Replace invalid chars
+            .replace(/\s+/g, '_') // Replace spaces with underscores
+            .replace(/_{2,}/g, '_') // Replace multiple underscores with single
+            .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+            .substring(0, 50); // Limit length to 50 chars
     }
 
     async preloadScreenshotSources() {
@@ -113,22 +130,34 @@ class ScreenshotService {
                 console.log('🖼️  Screenshot dimensions:', primarySource.thumbnail.getSize());
                 const screenshot = primarySource.thumbnail;
                 
-                // Generate filename: domain_user_ngày_giờ_phút.{extension}
-                const domain = this.extractDomainFromUrl(this.currentUrl || 'unknown');
-                const user = this.currentUser?.username || 'user';
+                // Generate filename: YYYYMMDD_region_league_match_domain.png
                 const now = new Date();
-                const day = now.getDate().toString().padStart(2, '0');
-                const month = (now.getMonth() + 1).toString().padStart(2, '0');
                 const year = now.getFullYear().toString();
-                const hour = now.getHours().toString().padStart(2, '0');
-                const minute = now.getMinutes().toString().padStart(2, '0');
-                const second = now.getSeconds().toString().padStart(2, '0');
-                const timestamp = `${day}${month}${year}_${hour}${minute}${second}`;
-                const filename = `${domain}_${user}_${timestamp}.png`;
+                const month = (now.getMonth() + 1).toString().padStart(2, '0');
+                const day = now.getDate().toString().padStart(2, '0');
+                const dateStr = `${year}${month}${day}`;
+                
+                // Get region name (sanitize for filename)
+                const regionName = this.sanitizeFilename(this.sessionData?.regionName || 'unknown');
+                
+                // Get league (sanitize for filename)
+                const league = this.sanitizeFilename(this.sessionData?.league || 'unknown');
+                
+                // Get match name (sanitize for filename)
+                const matchName = this.sanitizeFilename(this.sessionData?.matchName || 'unknown');
+                
+                // Get domain from URL
+                const domain = this.extractDomainFromUrl(this.currentUrl || 'unknown');
+                
+                // Build filename: YYYYMMDD_region_league_match_domain.png
+                const filename = `${dateStr}_${regionName}_${league}_${matchName}_${domain}.png`;
                 
                 console.log('📝 Generated filename:', filename);
+                console.log('📅 Date:', dateStr);
+                console.log('🌍 Region:', regionName);
+                console.log('🏆 League:', league);
+                console.log('⚽ Match:', matchName);
                 console.log('🌐 Domain:', domain);
-                console.log('👤 User:', user);
                 
                 // Save screenshot to local project folder
                 const projectDir = process.cwd();
