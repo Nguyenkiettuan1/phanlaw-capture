@@ -3186,15 +3186,15 @@ class TestAutomationDesktopApp {
             return;
         }
 
-        // Check if platform is facebook and validate view field
+        // View is required for "Social Media" types (not "web")
         const socialMediaType = this.sessionService.getSocialMediaType();
-        const isFacebook = socialMediaType && socialMediaType.toLowerCase() === 'facebook';
-        if (isFacebook) {
+        const isSocialMedia = socialMediaType && socialMediaType.toLowerCase() !== 'web';
+        if (isSocialMedia) {
             const viewInput = document.getElementById('popup-view');
             const viewValue = viewInput?.value?.trim();
             
             if (!viewValue) {
-                this.showNotification('Please enter a view (required for Facebook platform)', 'error');
+                this.showNotification('Please enter a view (required for Social Media platform)', 'error');
                 viewInput?.focus();
                 return;
             }
@@ -3257,13 +3257,13 @@ class TestAutomationDesktopApp {
         
         // Use main page URL instead of screenshotData.url
         const url = document.getElementById('url').value;
-        // Get view value if social media type is facebook
+        // Get view value if social media type is "Social Media" (not "web")
         const socialMediaType = this.sessionService.getSocialMediaType();
-        const isFacebook = socialMediaType && socialMediaType.toLowerCase() === 'facebook';
+        const isSocialMedia = socialMediaType && socialMediaType.toLowerCase() !== 'web';
         const viewInput = document.getElementById('popup-view');
         let view = null;
         
-        if (isFacebook && viewInput && viewInput.value.trim()) {
+        if (isSocialMedia && viewInput && viewInput.value.trim()) {
             const viewValue = viewInput.value.trim();
             // Validate view is a positive integer
             const viewInt = parseInt(viewValue, 10);
@@ -3279,7 +3279,7 @@ class TestAutomationDesktopApp {
         console.log('Selected signal ID:', selectedSignal);
         console.log('Signal name:', signalName);
         console.log('Social Media Type:', socialMediaType);
-        console.log('Is Facebook:', isFacebook);
+        console.log('Is Social Media:', isSocialMedia);
         console.log('View:', view);
 
         if (!url || url === 'No URL detected') {
@@ -3333,9 +3333,9 @@ class TestAutomationDesktopApp {
             return;
         }
 
-        // Validate view for facebook platform
-        if (isFacebook && !view) {
-            this.showNotification('Please enter a view (required for Facebook platform)', 'error');
+        // Validate view for Social Media platform (not web)
+        if (isSocialMedia && !view) {
+            this.showNotification('Please enter a view (required for Social Media platform)', 'error');
             viewInput?.focus();
             return;
         }

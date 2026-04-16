@@ -301,9 +301,9 @@ class UiService {
         
         // Get social media type from session service
         const socialMediaType = this.getCurrentSocialMediaType();
-        const isFacebook = socialMediaType && socialMediaType.toLowerCase() === 'facebook';
-        
-        if (isFacebook) {
+        const isSocialMedia = socialMediaType && socialMediaType.toLowerCase() !== 'web';
+
+        if (isSocialMedia) {
             if (viewSection) {
                 viewSection.classList.remove('hidden');
             }
@@ -377,7 +377,7 @@ class UiService {
             assignedUserId,
             socialMediaTypeId: socialMediaTypeId,
             socialMediaType: socialMediaType,
-            view: view, // View field for Facebook platform
+            view: view, // View field for Social Media platforms
             sessionData: sessionData, // Store full session data for later use
             filePath: screenshotData.path,
             status: 'uploading',
@@ -663,14 +663,22 @@ class UiService {
                 social_media_type_id: socialMediaTypeId
             };
             
-            // Add view field if social media type is facebook (must be integer)
-            const isFacebook = socialMediaType && socialMediaType.toLowerCase() === 'facebook';
-            if (isFacebook && queueItem.view !== null && queueItem.view !== undefined) {
+            // Add view field for "Social Media" types (not "web")
+            const isSocialMedia = socialMediaType && socialMediaType.toLowerCase() !== 'web';
+            if (isSocialMedia) {
+                if (queueItem.view === null || queueItem.view === undefined) {
+                    queueItem.status = 'error';
+                    queueItem.error = 'Missing view value for Social Media platform.';
+                    this.updateQueueDisplay();
+                    this.showErrorPopupWithDetails(queueItem);
+                    return;
+                }
+
                 // Ensure view is an integer
                 const viewInt = parseInt(queueItem.view, 10);
                 if (!isNaN(viewInt) && viewInt > 0) {
                     detectedLinkData.view = viewInt;
-                    console.log('📘 Adding view field for Facebook platform (as int):', viewInt);
+                    console.log('📘 Adding view field for Social Media platform (as int):', viewInt);
                 } else {
                     console.error('❌ Invalid view value:', queueItem.view);
                     queueItem.status = 'error';
