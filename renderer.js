@@ -15,7 +15,7 @@ class TestAutomationDesktopApp {
         this.signals = [];
         this.apiBaseUrl = config.apiBaseUrl; // Use config from app.config.js
         
-        // Store sport data for bucket name
+        // Store sport data (screenshot filename / session labels)
         this.currentLeague = null;
         this.currentMatchName = null;
         
@@ -23,6 +23,14 @@ class TestAutomationDesktopApp {
         this.urlWarningElement = null;
         this.currentWarnedUrl = null;
         this.urlCheckDebounce = null;
+
+        // Tracker table: optional live async command status per detected_link_image row
+        this.linkTrackerCommandByImageId = new Map();
+        this.linkTrackerCommandPollCancel = new Map();
+        this.trackerEntries = [];
+        this.trackerEntryByDetectedLinkId = new Map();
+        this.trackerImageToDetectedLinkId = new Map();
+        this.trackerNextStt = 1;
         
         // Initialize services
         this.uiService = new UiService();
@@ -121,6 +129,58 @@ class TestAutomationDesktopApp {
         document.addEventListener('loadPopupSignals', (event) => {
             const { page, query, isNewSearch } = event.detail;
             this.loadPopupSignals(page, query, isNewSearch);
+        });
+
+        window.addEventListener('detected-link-updated', () => {
+            this.refreshLinkTracker();
+        });
+
+        const openTrackerBtn = document.getElementById('open-tracker-view-btn');
+        if (openTrackerBtn) {
+            openTrackerBtn.addEventListener('click', () => this.showTrackerPage());
+        }
+        const trackerBackBtn = document.getElementById('tracker-back-btn');
+        if (trackerBackBtn) {
+            trackerBackBtn.addEventListener('click', () => this.showMainWorkflowPage());
+        }
+
+        window.addEventListener('tracker-link-created', (ev) => {
+            const d = ev.detail || {};
+            if (!d.detectedLinkId || !d.url) return;
+            this.upsertTrackerEntry({
+                detectedLinkId: d.detectedLinkId,
+                url: d.url,
+                status: 'Created'
+            });
+        });
+
+        window.addEventListener('tracker-upload-started', (ev) => {
+            const d = ev.detail || {};
+            if (!d.detectedLinkId) return;
+            this.upsertTrackerEntry({
+                detectedLinkId: d.detectedLinkId,
+                url: d.url || this.trackerEntryByDetectedLinkId.get(d.detectedLinkId)?.url,
+                status: 'Process (pulling)'
+            });
+        });
+
+        window.addEventListener('tracker-upload-finished', (ev) => {
+            const d = ev.detail || {};
+            if (!d.detectedLinkId) return;
+            const status = d.success ? 'Done' : 'Failed';
+            this.upsertTrackerEntry({
+                detectedLinkId: d.detectedLinkId,
+                imageId: d.imageId || null,
+                status,
+                command: d.command || null
+            });
+        });
+
+        window.addEventListener('tracker-image-command', (ev) => {
+            const d = ev.detail;
+            if (d?.imageId && d?.commandId) {
+                this.handleTrackerImageCommand(d.imageId, d.commandId);
+            }
         });
 
         // Sport filter inputs - reload sports when filters change
@@ -1050,6 +1110,10 @@ class TestAutomationDesktopApp {
         // Reset UI elements
         document.getElementById('login-section').classList.remove('hidden');
         document.getElementById('main-interface').classList.add('hidden');
+        const trackerPage = document.getElementById('tracker-page');
+        if (trackerPage) {
+            trackerPage.classList.add('hidden');
+        }
         
         // Reset form fields
         document.getElementById('username').value = '';
@@ -1058,8 +1122,7 @@ class TestAutomationDesktopApp {
         document.getElementById('sport').value = '';
         document.getElementById('signal').value = '';
         document.getElementById('url').value = '';
-        document.getElementById('bucket-name').value = '';
-        
+
         // Reset input fields
         document.getElementById('region').value = '';
         document.getElementById('sport').value = '';
@@ -1094,7 +1157,31 @@ class TestAutomationDesktopApp {
 
     showMainInterface(user) {
         this.uiService.showMainInterface(user);
+        this.showMainWorkflowPage();
         this.loadData();
+    }
+
+    showTrackerPage() {
+        const main = document.getElementById('main-interface');
+        const tracker = document.getElementById('tracker-page');
+        if (!main || !tracker) return;
+        const userInfo = main.querySelector('.user-info');
+        const workflow = main.querySelector('.workflow-container');
+        if (userInfo) userInfo.classList.add('hidden');
+        if (workflow) workflow.classList.add('hidden');
+        tracker.classList.remove('hidden');
+        this.renderTrackerPageList();
+    }
+
+    showMainWorkflowPage() {
+        const main = document.getElementById('main-interface');
+        const tracker = document.getElementById('tracker-page');
+        if (!main || !tracker) return;
+        tracker.classList.add('hidden');
+        const userInfo = main.querySelector('.user-info');
+        const workflow = main.querySelector('.workflow-container');
+        if (userInfo) userInfo.classList.remove('hidden');
+        if (workflow) workflow.classList.remove('hidden');
     }
 
     async loadData() {
@@ -2126,16 +2213,12 @@ class TestAutomationDesktopApp {
         }
 
         try {
-            // Get region name for default bucket name
-            const regionInput = document.getElementById('region');
             const regionValue = regionInput.value || '';
             const regionName = regionValue.includes(' - ') ? regionValue.split(' - ')[0] : regionValue;
-            
-            // Use stored sport data for bucket name
+
             let sportInfo = '';
-            const sportInput = document.getElementById('sport');
             const sportValue = sportInput.value || '';
-            
+
             if (this.currentLeague && this.currentMatchName) {
                 sportInfo = `${this.currentLeague} ${this.currentMatchName}`;
                 console.log('🏈 Using stored sport data:', {
@@ -2144,12 +2227,10 @@ class TestAutomationDesktopApp {
                     sportInfo: sportInfo
                 });
             } else if (sportValue) {
-                // If no stored data but sport input has value, try to parse it
                 console.log('⚠️ No stored sport data, parsing from sport input:', sportValue);
                 this.parseAndStoreSportData(sportValue);
-                
+
                 if (this.currentLeague && this.currentMatchName) {
-                    // Successfully parsed, use parsed data
                     sportInfo = `${this.currentLeague} ${this.currentMatchName}`;
                     console.log('✅ Parsed sport data:', {
                         league: this.currentLeague,
@@ -2157,12 +2238,9 @@ class TestAutomationDesktopApp {
                         sportInfo: sportInfo
                     });
                 } else {
-                    // Failed to parse, use raw value but remove date format if present
-                    // Format: "league - date - match" -> "league match"
                     if (sportValue.includes(' - ')) {
                         const parts = sportValue.split(' - ');
                         if (parts.length >= 3) {
-                            // Remove date part (usually index 1) and join league + match
                             sportInfo = `${parts[0].trim()} ${parts.slice(2).join(' - ').trim()}`;
                             console.log('📝 Cleaned sport value (removed date):', sportInfo);
                         } else {
@@ -2173,25 +2251,7 @@ class TestAutomationDesktopApp {
                     }
                 }
             }
-            
-            // Generate default bucket name: region/DD-MM-YYYY/league match_name
-            const today = new Date();
-            const day = today.getDate().toString().padStart(2, '0');
-            const month = (today.getMonth() + 1).toString().padStart(2, '0');
-            const year = today.getFullYear().toString();
-            const dateStr = `${day}-${month}-${year}`;
-            
-            // Build final bucket name
-            let defaultBucketName = `${regionName}/${dateStr}`;
-            if (sportInfo) {
-                defaultBucketName += `/${sportInfo}`;
-            }
-            
-            // Always set bucket name when starting session (fix bug: regenerate on each start)
-            const bucketInput = document.getElementById('bucket-name');
-            bucketInput.value = defaultBucketName;
-            
-            // Get sport name for session - use stored data or parsed data
+
             const sportNameForSession = sportInfo || sportValue;
             
             // Get league and match name for filename
@@ -2218,6 +2278,7 @@ class TestAutomationDesktopApp {
                 const sessionData = this.sessionService.getSessionData();
                 await ipcRenderer.invoke('set-session-data', sessionData);
                 console.log('✅ Session data sent to main process:', sessionData);
+                this.refreshLinkTracker();
             } else {
                 this.showNotification('Failed to start session: ' + result.error, 'error');
             }
@@ -2231,12 +2292,11 @@ class TestAutomationDesktopApp {
         // Get selected fields
         const regionInput = document.getElementById('region');
         const sportInput = document.getElementById('sport');
-        const bucketInput = document.getElementById('bucket-name');
-        
+        const trackerGroup = document.getElementById('link-tracker-group');
+
         // Get parent form groups
         const regionGroup = regionInput?.closest('.form-group');
         const sportGroup = sportInput?.closest('.form-group');
-        const bucketGroup = bucketInput?.closest('.form-group');
         
         if (active) {
             // Add highlight classes
@@ -2253,14 +2313,11 @@ class TestAutomationDesktopApp {
             if (sportGroup) {
                 sportGroup.classList.add('session-active');
             }
-            
-            if (bucketInput) {
-                bucketInput.classList.add('session-active');
+
+            if (trackerGroup) {
+                trackerGroup.classList.add('session-active');
             }
-            if (bucketGroup) {
-                bucketGroup.classList.add('session-active');
-            }
-            
+
             // Highlight selected social media radio button
             const selectedRadio = document.querySelector('input[name="social-media-platform"]:checked');
             if (selectedRadio) {
@@ -2284,14 +2341,11 @@ class TestAutomationDesktopApp {
             if (sportGroup) {
                 sportGroup.classList.remove('session-active');
             }
-            
-            if (bucketInput) {
-                bucketInput.classList.remove('session-active');
+
+            if (trackerGroup) {
+                trackerGroup.classList.remove('session-active');
             }
-            if (bucketGroup) {
-                bucketGroup.classList.remove('session-active');
-            }
-            
+
             // Reset all social media radio button labels
             const allRadioLabels = document.querySelectorAll('#social-media-radio-container label');
             allRadioLabels.forEach(label => {
@@ -2322,6 +2376,7 @@ class TestAutomationDesktopApp {
                 // Update UI
                 this.updateSessionStatus('Not Started');
                 this.showNotification('Session stopped. You can start a new session.', 'info');
+                this.resetLinkTracker();
             } else {
                 this.showNotification('Failed to stop session: ' + result.error, 'error');
             }
@@ -2329,6 +2384,284 @@ class TestAutomationDesktopApp {
         } catch (error) {
             this.showNotification('Failed to stop session: ' + error.message, 'error');
         }
+    }
+
+    clearTrackerCommandPoll(imageId) {
+        const cancel = this.linkTrackerCommandPollCancel.get(imageId);
+        if (typeof cancel === 'function') {
+            cancel();
+        }
+        this.linkTrackerCommandPollCancel.delete(imageId);
+    }
+
+    clearAllTrackerCommandPolls() {
+        for (const cancel of this.linkTrackerCommandPollCancel.values()) {
+            if (typeof cancel === 'function') {
+                cancel();
+            }
+        }
+        this.linkTrackerCommandPollCancel.clear();
+    }
+
+    handleTrackerImageCommand(imageId, commandId) {
+        this.clearTrackerCommandPoll(imageId);
+        const state = { cancelled: false, timeoutId: null };
+        const cancel = () => {
+            state.cancelled = true;
+            if (state.timeoutId) {
+                clearTimeout(state.timeoutId);
+                state.timeoutId = null;
+            }
+        };
+        this.linkTrackerCommandPollCancel.set(imageId, cancel);
+
+        const step = async () => {
+            if (state.cancelled) return;
+            try {
+                const r = await ipcRenderer.invoke('get-command-status-once', { commandId });
+                if (state.cancelled) return;
+                if (r.success && r.data) {
+                    this.linkTrackerCommandByImageId.set(imageId, r.data);
+                    this._patchTrackerRowStatus(imageId);
+                    if (!r.data.is_terminal && !state.cancelled) {
+                        state.timeoutId = setTimeout(step, 5000);
+                    } else {
+                        this.linkTrackerCommandPollCancel.delete(imageId);
+                    }
+                } else if (!state.cancelled) {
+                    state.timeoutId = setTimeout(step, 5000);
+                }
+            } catch (err) {
+                console.warn('tracker command poll:', err);
+                if (!state.cancelled) {
+                    state.timeoutId = setTimeout(step, 5000);
+                }
+            }
+        };
+
+        state.timeoutId = setTimeout(step, 5000);
+    }
+
+    _patchTrackerRowStatus(imageId) {
+        const detectedLinkId = this.trackerImageToDetectedLinkId.get(imageId);
+        if (!detectedLinkId) return;
+        const entry = this.trackerEntryByDetectedLinkId.get(detectedLinkId);
+        if (!entry) return;
+        entry.status = this.formatTrackerImageStatus({ id: imageId, image_url: entry.imageUrl || '' });
+        this.renderTrackerList();
+    }
+
+    formatTrackerImageStatus(img) {
+        const cmd = this.linkTrackerCommandByImageId.get(img.id);
+        if (cmd) {
+            const st = (cmd.status || '').toLowerCase();
+            if (cmd.is_terminal) {
+                if (st === 'succeeded' || st === 'applied' || st === 'completed') {
+                    return 'Done';
+                }
+                return 'Failed';
+            }
+            return 'Process (pulling)';
+        }
+        const u = (img.image_url || '').trim();
+        if (!u) return 'Chưa có ảnh';
+        if (u.startsWith('pending_')) return 'Process (pulling)';
+        return 'Done';
+    }
+
+    getTrackerStatusClass(statusText) {
+        const s = String(statusText || '').toLowerCase();
+        if (s.includes('done')) return 'tracker-status-done';
+        if (s.includes('pulling') || s.includes('process')) return 'tracker-status-processing';
+        if (s.includes('failed') || s.includes('error')) return 'tracker-status-failed';
+        if (s.includes('created')) return 'tracker-status-created';
+        return 'tracker-status-default';
+    }
+
+    formatTrackerTimestamp(dateObj) {
+        if (!dateObj) return '';
+        const d = dateObj instanceof Date ? dateObj : new Date(dateObj);
+        if (Number.isNaN(d.getTime())) return '';
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mi = String(d.getMinutes()).padStart(2, '0');
+        const ss = String(d.getSeconds()).padStart(2, '0');
+        return `${dd}/${mm}/${yyyy} ${hh}:${mi}:${ss}`;
+    }
+
+    upsertTrackerEntry({ detectedLinkId, url = null, imageId = null, status = null, command = null }) {
+        if (!detectedLinkId) return;
+        let entry = this.trackerEntryByDetectedLinkId.get(detectedLinkId);
+        if (!entry) {
+            entry = {
+                detectedLinkId,
+                stt: this.trackerNextStt++,
+                url: url || '',
+                domain: '',
+                imageId: null,
+                imageUrl: '',
+                status: status || 'Created',
+                updatedAt: new Date()
+            };
+            this.trackerEntries.push(entry);
+            this.trackerEntryByDetectedLinkId.set(detectedLinkId, entry);
+        }
+
+        if (url) {
+            entry.url = url;
+            try {
+                entry.domain = new URL(url).host || url;
+            } catch (_) {
+                entry.domain = url;
+            }
+        }
+
+        if (imageId) {
+            entry.imageId = imageId;
+            this.trackerImageToDetectedLinkId.set(imageId, detectedLinkId);
+        }
+
+        if (command && imageId) {
+            this.linkTrackerCommandByImageId.set(imageId, command);
+            entry.status = this.formatTrackerImageStatus({ id: imageId, image_url: entry.imageUrl || '' });
+            entry.updatedAt = new Date();
+        } else if (status) {
+            entry.status = status;
+            entry.updatedAt = new Date();
+        }
+
+        this.renderTrackerList();
+    }
+
+    renderTrackerList() {
+        const meta = document.getElementById('tracker-meta-line');
+        const tbody = document.getElementById('link-tracker-table-body');
+        if (!meta || !tbody) return;
+
+        tbody.innerHTML = '';
+        if (!this.trackerEntries.length) {
+            const tr = document.createElement('tr');
+            tr.className = 'link-tracker-placeholder';
+            const td = document.createElement('td');
+            td.colSpan = 3;
+            td.textContent = 'Chưa có link nào được create/upload trong session.';
+            tr.appendChild(td);
+            tbody.appendChild(tr);
+            meta.textContent = 'Danh sách tracker: 0 link';
+            return;
+        }
+
+        for (const entry of this.trackerEntries) {
+            const tr = document.createElement('tr');
+            const tdStt = document.createElement('td');
+            tdStt.className = 'link-tracker-col-stt';
+            tdStt.textContent = String(entry.stt);
+
+            const tdDomain = document.createElement('td');
+            tdDomain.className = 'link-tracker-url';
+            tdDomain.textContent = entry.domain || entry.url || '—';
+            tdDomain.title = entry.url || entry.domain || '';
+
+            const tdStatus = document.createElement('td');
+            tdStatus.className = `link-tracker-status ${this.getTrackerStatusClass(entry.status)}`;
+            const statusMain = document.createElement('div');
+            statusMain.className = 'tracker-status-main';
+            statusMain.textContent = entry.status || '—';
+            const statusTime = document.createElement('div');
+            statusTime.className = 'tracker-status-time';
+            statusTime.textContent = this.formatTrackerTimestamp(entry.updatedAt) || '—';
+            tdStatus.appendChild(statusMain);
+            tdStatus.appendChild(statusTime);
+
+            tr.appendChild(tdStt);
+            tr.appendChild(tdDomain);
+            tr.appendChild(tdStatus);
+            tbody.appendChild(tr);
+        }
+
+        meta.textContent = `Danh sách tracker: ${this.trackerEntries.length} link`;
+        this.renderTrackerPageList();
+    }
+
+    renderTrackerPageList() {
+        const meta = document.getElementById('tracker-page-meta');
+        const tbody = document.getElementById('tracker-page-table-body');
+        if (!meta || !tbody) return;
+
+        tbody.innerHTML = '';
+        if (!this.trackerEntries.length) {
+            const tr = document.createElement('tr');
+            tr.className = 'link-tracker-placeholder';
+            const td = document.createElement('td');
+            td.colSpan = 3;
+            td.textContent = 'Chưa có link nào được create/upload trong session.';
+            tr.appendChild(td);
+            tbody.appendChild(tr);
+            meta.textContent = 'Danh sách tracker: 0 link';
+            return;
+        }
+
+        for (const entry of this.trackerEntries) {
+            const tr = document.createElement('tr');
+
+            const tdStt = document.createElement('td');
+            tdStt.className = 'tracker-page-col-stt';
+            tdStt.textContent = String(entry.stt);
+
+            const tdUrl = document.createElement('td');
+            tdUrl.textContent = entry.url || entry.domain || '—';
+            tdUrl.title = entry.url || '';
+            tdUrl.style.wordBreak = 'break-all';
+
+            const tdStatus = document.createElement('td');
+            tdStatus.className = this.getTrackerStatusClass(entry.status);
+            const statusMain = document.createElement('div');
+            statusMain.className = 'tracker-status-main';
+            statusMain.textContent = entry.status || '—';
+            const statusTime = document.createElement('div');
+            statusTime.className = 'tracker-status-time';
+            statusTime.textContent = this.formatTrackerTimestamp(entry.updatedAt) || '—';
+            tdStatus.appendChild(statusMain);
+            tdStatus.appendChild(statusTime);
+
+            tr.appendChild(tdStt);
+            tr.appendChild(tdUrl);
+            tr.appendChild(tdStatus);
+            tbody.appendChild(tr);
+        }
+
+        meta.textContent = `Danh sách tracker: ${this.trackerEntries.length} link`;
+    }
+
+    resetLinkTracker(message = null) {
+        this.clearAllTrackerCommandPolls();
+        this.linkTrackerCommandByImageId.clear();
+        this.trackerImageToDetectedLinkId.clear();
+        this.trackerEntryByDetectedLinkId.clear();
+        this.trackerEntries = [];
+        this.trackerNextStt = 1;
+        const meta = document.getElementById('tracker-meta-line');
+        const tbody = document.getElementById('link-tracker-table-body');
+        if (meta) {
+            meta.textContent = '—';
+        }
+        if (!tbody) {
+            return;
+        }
+        tbody.innerHTML = '';
+        const tr = document.createElement('tr');
+        tr.className = 'link-tracker-placeholder';
+        const td = document.createElement('td');
+        td.colSpan = 3;
+        td.textContent = message || '—';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+    }
+
+    async refreshLinkTracker() {
+        this.renderTrackerList();
     }
 
     async takeScreenshot() {
@@ -2390,7 +2723,7 @@ class TestAutomationDesktopApp {
                 document.getElementById('url').value = result.url;
                 this.showNotification('URL detected from clipboard!', 'success');
                 // Check for duplicate URL and show warning
-                this.checkUrlExistsAndWarn(result.url);
+                this.refreshLinkTracker();
             } else {
                 this.showNotification('No URL found in clipboard. Please copy a URL first.', 'error');
             }
@@ -2422,8 +2755,7 @@ class TestAutomationDesktopApp {
         const popup = document.getElementById('screenshot-popup');
         const isPopupVisible = !popup.classList.contains('hidden');
         
-        let signalId, url, bucketName;
-        
+        let signalId, url;
         if (isPopupVisible) {
             // Use popup-specific method
             this.uploadScreenshotFromPopup();
@@ -2433,7 +2765,6 @@ class TestAutomationDesktopApp {
             const signalInput = document.getElementById('signal');
             signalId = signalInput.dataset.value || signalInput.value;
             url = document.getElementById('url').value;
-            bucketName = document.getElementById('bucket-name').value;
         }
 
         if (!signalId) {
@@ -2443,11 +2774,6 @@ class TestAutomationDesktopApp {
 
         if (!url) {
             this.showNotification('Please enter or detect URL', 'error');
-            return;
-        }
-
-        if (!bucketName) {
-            this.showNotification('Please enter storage folder name', 'error');
             return;
         }
 
@@ -2468,7 +2794,7 @@ class TestAutomationDesktopApp {
         const userData = this.sessionService.getCurrentUser();
         
         // Add to upload queue for background processing
-        const queueId = this.uiService.addToUploadQueue(signalId, currentUrl, bucketName, signalName, this.screenshotData, sessionData, userData);
+        const queueId = this.uiService.addToUploadQueue(signalId, currentUrl, signalName, this.screenshotData, sessionData, userData);
         
         if (queueId) {
             // Immediate feedback - no waiting for API
@@ -2525,7 +2851,7 @@ class TestAutomationDesktopApp {
 
     clearForm() {
         document.getElementById('signal').value = '';
-        // Keep URL and bucket-name for next screenshot
+        // Keep URL for next screenshot
         // document.getElementById('url').value = ''; // DON'T clear URL!
     }
 
@@ -2545,8 +2871,7 @@ class TestAutomationDesktopApp {
         document.getElementById('sport').value = '';
         document.getElementById('signal').value = '';
         document.getElementById('url').value = '';
-        document.getElementById('bucket-name').value = '';
-        
+
         // Clear input fields
         document.getElementById('region').value = '';
         document.getElementById('sport').value = '';
@@ -2767,11 +3092,7 @@ class TestAutomationDesktopApp {
             });
         }
         
-        // Check for duplicate URL and show warning
-        this.checkUrlExistsAndWarn(url);
-        
-        // Check for duplicate URL and show warning
-        this.checkUrlExistsAndWarn(url);
+        this.handleUrlChange();
     }
 
     showScreenshotPopup(data) {
@@ -2794,11 +3115,11 @@ class TestAutomationDesktopApp {
         // Only check if URL is valid and session is active
         if (url && url.startsWith('http')) {
             this.urlCheckDebounce = setTimeout(() => {
-                this.checkUrlExistsAndWarn(url);
+                this.refreshLinkTracker();
             }, 500); // 500ms debounce
         } else if (!url) {
-            // URL is empty, hide warning
             this.hideUrlWarning();
+            this.resetLinkTracker('Nhập hoặc phát hiện URL để xem trạng thái');
         }
     }
 
@@ -2808,46 +3129,6 @@ class TestAutomationDesktopApp {
             this.urlWarningElement = null;
         }
         this.currentWarnedUrl = null;
-    }
-
-    async checkUrlExistsAndWarn(url) {
-        // Only check if session is active and has sportId
-        const sessionData = this.sessionService.getSessionData();
-        if (!sessionData || !sessionData.sportId) {
-            // No active session, don't check
-            return;
-        }
-        
-        // Don't check if URL is empty or invalid
-        if (!url || !url.startsWith('http')) {
-            return;
-        }
-        
-        // If this is the same URL we already warned about, don't check again
-        if (this.currentWarnedUrl === url) {
-            return;
-        }
-        
-        try {
-            const { ipcRenderer } = require('electron');
-            const urlCheckResult = await ipcRenderer.invoke('check-url-exists', { 
-                url, 
-                sportId: sessionData.sportId 
-            });
-            
-            if (urlCheckResult.success && urlCheckResult.exists) {
-                // URL exists, show warning
-                this.showUrlWarning(url);
-            } else {
-                // URL doesn't exist or check failed, hide warning if showing
-                if (this.currentWarnedUrl === url) {
-                    this.hideUrlWarning();
-                }
-            }
-        } catch (error) {
-            console.error('Error checking URL exists:', error);
-            // On error, don't show warning (better to not warn than to warn incorrectly)
-        }
     }
 
     showUrlWarning(url) {
@@ -2976,8 +3257,6 @@ class TestAutomationDesktopApp {
         
         // Use main page URL instead of screenshotData.url
         const url = document.getElementById('url').value;
-        const bucketName = document.getElementById('bucket-name').value;
-
         // Get view value if social media type is facebook
         const socialMediaType = this.sessionService.getSocialMediaType();
         const isFacebook = socialMediaType && socialMediaType.toLowerCase() === 'facebook';
@@ -2997,7 +3276,6 @@ class TestAutomationDesktopApp {
         }
 
         console.log('URL check:', url);
-        console.log('Bucket name:', bucketName);
         console.log('Selected signal ID:', selectedSignal);
         console.log('Signal name:', signalName);
         console.log('Social Media Type:', socialMediaType);
@@ -3007,11 +3285,6 @@ class TestAutomationDesktopApp {
         if (!url || url === 'No URL detected') {
             console.log('❌ No URL available for upload');
             this.showNotification('No URL available for upload', 'error');
-            return;
-        }
-
-        if (!bucketName) {
-            this.showNotification('Please enter storage folder name', 'error');
             return;
         }
 
@@ -3077,7 +3350,7 @@ class TestAutomationDesktopApp {
         const userData = this.sessionService.getCurrentUser();
         
         // Add to upload queue for background processing (with view if facebook)
-        const queueId = this.uiService.addToUploadQueue(selectedSignal, currentUrl, bucketName, signalName, this.screenshotData, sessionData, userData, view);
+        const queueId = this.uiService.addToUploadQueue(selectedSignal, currentUrl, signalName, this.screenshotData, sessionData, userData, view);
         
         if (queueId) {
             // Immediate feedback - no waiting for API

@@ -1,5 +1,6 @@
 // API Service Module - Handles all API communications
 const axios = require('axios');
+const { randomUUID } = require('crypto');
 const config = require('../../app.config');
 
 class ApiService {
@@ -25,6 +26,124 @@ class ApiService {
         console.log('🧹 Cache cleared (no cache currently implemented)');
     }
 
+    buildAsyncHeaders() {
+        return {
+            'Idempotency-Key': randomUUID(),
+            'X-Correlation-Id': randomUUID()
+        };
+    }
+
+    buildAuthHeaders(extraHeaders = {}) {
+        return {
+            'Authorization': `Bearer ${this.accessToken}`,
+            ...extraHeaders
+        };
+    }
+
+    isAsyncAcceptedPayload(payload) {
+        return Boolean(payload && payload.command_id && payload.status === 'accepted');
+    }
+
+    isCommandSuccessful(commandStatus) {
+        const status = (commandStatus?.status || '').toLowerCase();
+        return status === 'succeeded' || status === 'applied' || status === 'completed';
+    }
+
+    extractErrorMessage(error, fallback = 'Request failed') {
+        const detail = error?.response?.data?.detail;
+        if (typeof detail === 'string' && detail.trim()) {
+            return detail;
+        }
+
+        if (Array.isArray(detail) && detail.length > 0) {
+            const firstDetail = detail[0];
+            if (typeof firstDetail === 'string') {
+                return firstDetail;
+            }
+            if (firstDetail?.msg) {
+                return firstDetail.msg;
+            }
+        }
+
+        return error?.response?.data?.message || error?.message || fallback;
+    }
+
+    async pollCommandStatus(commandId, options = {}) {
+        const timeoutMs = options.timeoutMs || 120000;
+        const intervalMs = options.intervalMs || 5000;
+        const initialDelayMs = options.initialDelayMs ?? 5000;
+        const startedAt = Date.now();
+
+        if (initialDelayMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, initialDelayMs));
+        }
+
+        let lastResponse = null;
+
+        while (Date.now() - startedAt < timeoutMs) {
+            const response = await axios.get(`${this.apiBaseUrl}/commands/${commandId}`, {
+                headers: this.buildAuthHeaders()
+            });
+
+            lastResponse = response.data;
+
+            if (lastResponse?.is_terminal) {
+                return lastResponse;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
+        }
+
+        throw new Error(`Async command timeout after ${timeoutMs}ms (command_id=${commandId})`);
+    }
+
+    async fetchDetectedLinkImageById(imageId) {
+        try {
+            const response = await axios.get(`${this.apiBaseUrl}/detected_link_images/${imageId}`, {
+                headers: this.buildAuthHeaders()
+            });
+            return response.data;
+        } catch (error) {
+            console.warn('⚠️ Could not fetch detected link image detail by id:', imageId);
+            return null;
+        }
+    }
+
+    async listDetectedLinkImages(detectedLinkId, page = 1, pageSize = 100) {
+        try {
+            const qs = new URLSearchParams({
+                page: String(page),
+                page_size: String(pageSize),
+                detected_link_id: detectedLinkId
+            });
+            const response = await axios.get(`${this.apiBaseUrl}/detected_link_images/?${qs.toString()}`, {
+                headers: this.buildAuthHeaders({ Accept: 'application/json' })
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            console.error('❌ Error listing detected link images:', error.response?.data || error.message);
+            return {
+                success: false,
+                error: this.extractErrorMessage(error, 'Failed to list detected link images')
+            };
+        }
+    }
+
+    async getCommandStatusOnce(commandId) {
+        try {
+            const response = await axios.get(`${this.apiBaseUrl}/commands/${commandId}`, {
+                headers: this.buildAuthHeaders({ Accept: 'application/json' })
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            console.error('❌ Error fetching command status:', error.response?.data || error.message);
+            return {
+                success: false,
+                error: this.extractErrorMessage(error, 'Failed to fetch command status')
+            };
+        }
+    }
+
     async login(credentials) {
         try {
             const formData = new URLSearchParams();
@@ -48,7 +167,7 @@ class ApiService {
     async getCurrentUser() {
         try {
             const response = await axios.get(`${this.apiBaseUrl}/auth/me`, {
-                headers: { 'Authorization': `Bearer ${this.accessToken}` }
+                headers: this.buildAuthHeaders()
             });
             return { success: true, data: response.data };
         } catch (error) {
@@ -68,7 +187,9 @@ class ApiService {
             }
             
             console.log('🌍 Fetching regions with params:', queryParams);
-            const response = await axios.get(`${this.apiBaseUrl}/regions?${queryParams}`);
+            const response = await axios.get(`${this.apiBaseUrl}/regions/?${queryParams}`, {
+                headers: this.buildAuthHeaders({ 'Accept': 'application/json' })
+            });
             return { success: true, data: response.data };
         } catch (error) {
             console.error('❌ Error fetching regions:', error.response?.data || error.message);
@@ -88,7 +209,9 @@ class ApiService {
             }
             
             console.log('🔔 Fetching signals with params:', queryParams);
-            const response = await axios.get(`${this.apiBaseUrl}/signals?${queryParams}`);
+            const response = await axios.get(`${this.apiBaseUrl}/signals/?${queryParams}`, {
+                headers: this.buildAuthHeaders({ 'Accept': 'application/json' })
+            });
             return { success: true, data: response.data };
         } catch (error) {
             console.error('❌ Error fetching signals:', error.response?.data || error.message);
@@ -101,20 +224,35 @@ class ApiService {
             // Build query params
             let queryParams = `page=${page}&page_size=${pageSize}&region_id=${regionId}`;
             
-            // Add search params if provided
-            // Note: Backend API only supports searching by league OR match_name separately
-            // Here we search by league only (you can also try match_name if needed)
+            // OpenAPI v1.0.1: sports list uses `search` for broad text search.
             if (searchQuery && searchQuery.trim()) {
                 const search = encodeURIComponent(searchQuery.trim());
-                queryParams += `&league=${search}`;
+                queryParams += `&search=${search}`;
             }
             
             console.log('🏆 Fetching sports with params:', queryParams);
-            const response = await axios.get(`${this.apiBaseUrl}/sports?${queryParams}`);
+            const response = await axios.get(`${this.apiBaseUrl}/sports/?${queryParams}`, {
+                headers: this.buildAuthHeaders({ 'Accept': 'application/json' })
+            });
             return { success: true, data: response.data };
         } catch (error) {
             console.error('❌ Error fetching sports:', error.response?.data || error.message);
             return { success: false, error: error.message };
+        }
+    }
+
+    async getDetectedLink(detectedLinkId) {
+        try {
+            const response = await axios.get(`${this.apiBaseUrl}/detected_links/${detectedLinkId}`, {
+                headers: this.buildAuthHeaders({ Accept: 'application/json' })
+            });
+            return { success: true, data: response.data };
+        } catch (error) {
+            console.error('❌ Error fetching detected link:', error.response?.data || error.message);
+            return {
+                success: false,
+                error: this.extractErrorMessage(error, 'Failed to fetch detected link')
+            };
         }
     }
 
@@ -135,10 +273,9 @@ class ApiService {
             // Use new check-exists API instead of pagination
             const queryParams = `url=${encodeURIComponent(url)}&sport_id=${sportId}`;
             const response = await axios.post(`${this.apiBaseUrl}/detected_links/check-exists?${queryParams}`, {}, {
-                headers: {
-                    'Authorization': `Bearer ${this.accessToken}`,
+                headers: this.buildAuthHeaders({
                     'Content-Type': 'application/json'
-                }
+                })
             });
             
             console.log('🔍 API Response:', response.data);
@@ -218,49 +355,91 @@ class ApiService {
             console.log('📤 Request body:', requestBody);
             
             const response = await axios.post(`${this.apiBaseUrl}/detected_links`, requestBody, {
-                headers: {
-                    'Authorization': `Bearer ${this.accessToken}`,
+                headers: this.buildAuthHeaders({
                     'Content-Type': 'application/json'
-                }
+                })
             });
-            
+
+            if (this.isAsyncAcceptedPayload(response.data)) {
+                const commandId = response.data.command_id;
+                console.log('⏳ Detected link command accepted:', commandId);
+                const commandStatus = await this.pollCommandStatus(commandId);
+                const normalizedStatus = commandStatus?.status;
+
+                if (this.isCommandSuccessful(commandStatus)) {
+                    if (commandStatus.aggregate_id) {
+                        return { success: true, data: { id: commandStatus.aggregate_id, command: commandStatus } };
+                    }
+                    return { success: true, data: { command: commandStatus } };
+                }
+
+                return {
+                    success: false,
+                    error: commandStatus?.error_detail || commandStatus?.conflict_detail || `Command failed with status: ${normalizedStatus}`,
+                    command: commandStatus
+                };
+            }
+
             console.log('✅ Detected link created:', response.data);
             return { success: true, data: response.data };
         } catch (error) {
             console.error('❌ Error creating detected link:', error.response?.data || error.message);
-            return { 
-                success: false, 
-                error: error.response?.data?.detail || error.message 
+            return {
+                success: false,
+                error: this.extractErrorMessage(error, 'Failed to create detected link')
             };
         }
     }
 
-    async uploadScreenshot(filePath, detectedLinkId, bucketName = 'screenshots', provider = 'GOOGLE_CLOUD') {
+    async uploadScreenshot(filePath, detectedLinkId) {
         try {
             const FormData = require('form-data');
             const form = new FormData();
-            
+
             form.append('file', require('fs').createReadStream(filePath));
-            
             form.append('detected_link_id', detectedLinkId);
-            form.append('bucket_name', bucketName);
-            form.append('provider', provider);
-            form.append('bulk', 'True')
-            
+
             const response = await axios.post(`${this.apiBaseUrl}/detected_link_images/upload`, form, {
-                headers: {
-                    'Authorization': `Bearer ${this.accessToken}`,
+                headers: this.buildAuthHeaders({
+                    ...this.buildAsyncHeaders(),
                     ...form.getHeaders()
-                }
+                })
             });
-            
+
+            if (this.isAsyncAcceptedPayload(response.data)) {
+                const commandId = response.data.command_id;
+                console.log('⏳ Upload command accepted:', commandId);
+                const commandStatus = await this.pollCommandStatus(commandId);
+                const normalizedStatus = commandStatus?.status;
+
+                if (this.isCommandSuccessful(commandStatus)) {
+                    let uploadData = { command: commandStatus };
+
+                    if (commandStatus.aggregate_id) {
+                        const detail = await this.fetchDetectedLinkImageById(commandStatus.aggregate_id);
+                        if (detail) {
+                            uploadData = { ...detail, command: commandStatus };
+                        }
+                    }
+
+                    console.log('✅ Upload async command succeeded:', commandStatus);
+                    return { success: true, data: uploadData };
+                }
+
+                return {
+                    success: false,
+                    error: commandStatus?.error_detail || commandStatus?.conflict_detail || `Upload command failed with status: ${normalizedStatus}`,
+                    command: commandStatus
+                };
+            }
+
             console.log('✅ Upload response:', response.data);
             return { success: true, data: response.data };
         } catch (error) {
             console.error('❌ Upload error:', error.response?.data || error.message);
-            return { 
-                success: false, 
-                error: error.response?.data?.detail || error.message 
+            return {
+                success: false,
+                error: this.extractErrorMessage(error, 'Failed to upload screenshot')
             };
         }
     }
@@ -269,17 +448,16 @@ class ApiService {
         try {
             console.log('🔔 Creating new signal:', signalData);
             const response = await axios.post(`${this.apiBaseUrl}/signals`, signalData, {
-                headers: {
-                    'Authorization': `Bearer ${this.accessToken}`,
+                headers: this.buildAuthHeaders({
                     'Content-Type': 'application/json'
-                }
+                })
             });
             return { success: true, data: response.data };
         } catch (error) {
             console.error('❌ Error creating signal:', error.response?.data || error.message);
             return { 
                 success: false, 
-                error: error.response?.data?.detail || error.message 
+                error: this.extractErrorMessage(error, 'Failed to create signal')
             };
         }
     }

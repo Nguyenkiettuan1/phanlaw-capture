@@ -7,13 +7,37 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
+  build-windows:
+    runs-on: windows-latest
     
-    strategy:
-      matrix:
-        os: [windows-latest, macos-latest]
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
         
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build Windows (Setup + Portable)
+      run: npm run dist
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Upload Windows artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-dist
+        path: dist/
+        retention-days: 7
+
+  build-macos:
+    runs-on: macos-latest
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -27,45 +51,135 @@ jobs:
     - name: Install dependencies
       run: npm ci
       
-    - name: Preflight (macOS icon required)
-      if: matrix.os == 'macos-latest'
+    - name: Generate macOS icon (.icns) from .ico using built-in tools (if missing)
       shell: bash
       run: |
-        if [ ! -f "assets/icon.icns" ]; then
-          echo "::error::Missing assets/icon.icns. macOS build requires an .icns icon. Please add assets/icon.icns (see MACOS_SETUP.md)."
+        if [ -f "assets/icon.icns" ]; then
+          echo "assets/icon.icns already exists, skipping."
+          exit 0
+        fi
+        if [ ! -f "assets/icon.ico" ]; then
+          echo "::error::Missing assets/icon.ico. Cannot generate icon.icns."
           exit 1
         fi
 
-    - name: Build Windows (no publish)
-      if: matrix.os == 'windows-latest'
-      run: npm run dist
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        echo "Generating assets/icon.png from assets/icon.ico (sips)..."
+        mkdir -p assets
+        sips -s format png assets/icon.ico --out assets/icon.png
 
-    - name: Build macOS (no publish)
-      if: matrix.os == 'macos-latest'
+        echo "Generating .iconset and converting to .icns (iconutil)..."
+        ICONSET_DIR=$(mktemp -d -t icon.iconset).iconset
+        mkdir -p "$ICONSET_DIR"
+
+        for size in 16 32 128 256 512; do
+          sips -z $size $size assets/icon.png --out "$ICONSET_DIR/icon_${size}x${size}.png"
+          sips -z $((size*2)) $((size*2)) assets/icon.png --out "$ICONSET_DIR/icon_${size}x${size}@2x.png"
+        done
+
+        iconutil -c icns "$ICONSET_DIR" -o assets/icon.icns
+        ls -lh assets/icon.icns assets/icon.png
+
+    - name: Build macOS
       shell: bash
       run: npx electron-builder --mac --publish=never
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
-    - name: Upload build artifacts
+    - name: Upload macOS artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.os }}-dist
+        name: macos-dist
         path: dist/
+        retention-days: 7
+
+  release:
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download Windows artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-dist
+        path: artifacts/windows
         
-    - name: Create/Update GitHub Release (attach artifacts)
-      if: startsWith(github.ref, 'refs/tags/')
+    - name: Download macOS artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: macos-dist
+        path: artifacts/macos
+        continue-on-error: true
+        
+    - name: Extract version from tag
+      id: version
+      shell: bash
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Tag version: $VERSION"
+        
+    - name: List all artifacts
+      shell: bash
+      run: |
+        echo "=== Windows artifacts ==="
+        find artifacts/windows -type f 2>/dev/null | sort || echo "No Windows artifacts found"
+        echo ""
+        echo "=== macOS artifacts ==="
+        find artifacts/macos -type f 2>/dev/null | sort || echo "No macOS artifacts found"
+        
+    - name: Prepare release files
+      shell: bash
+      run: |
+        # Flatten directory structure for easier file matching
+        mkdir -p release-files
+        
+        # Copy Windows files
+        if [ -d "artifacts/windows" ]; then
+          find artifacts/windows -type f \( -name "*.exe" -o -name "*.blockmap" -o -name "*.yml" \) -exec cp {} release-files/ \;
+        fi
+        
+        # Copy macOS files
+        if [ -d "artifacts/macos" ]; then
+          find artifacts/macos -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.yml" \) -exec cp {} release-files/ \;
+        fi
+        
+        echo "=== Files ready for release ==="
+        ls -lh release-files/ || echo "No files found"
+        
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
+        tag_name: ${{ github.ref_name }}
+        name: Release ${{ github.ref_name }}
+        body: |
+          ## Release ${{ steps.version.outputs.version }}
+          
+          ### Windows
+          - **Setup Installer**: `Test-Automation-Screen-Auto-Setup-${{ steps.version.outputs.version }}.exe`
+          - **Portable**: `Test-Automation-Screen-Auto-Portable-${{ steps.version.outputs.version }}.exe`
+          
+          ### macOS
+          - **DMG**: `Test-Automation-Screen-Auto-${{ steps.version.outputs.version }}.dmg`
+          
+          ### Auto-Update Files
+          - `latest.yml` (for electron-updater)
+          - `*.blockmap` (for incremental updates)
+          
+          ---
+          
+          **Installation:**
+          - **Windows**: Download Setup exe for installer, or Portable exe for portable version
+          - **macOS**: Download DMG file and drag to Applications folder
+          
+          **Auto-update**: The app will automatically check for updates and notify you when a new version is available.
         files: |
-          dist/*.exe
-          dist/*.dmg
-          dist/*.zip
-          dist/*.yml
-          dist/*.blockmap
+          release-files/*
         draft: false
         prerelease: false
+        make_latest: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

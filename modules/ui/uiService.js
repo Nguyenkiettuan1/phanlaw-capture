@@ -219,12 +219,20 @@ class UiService {
     showMainInterface(user) {
         document.getElementById('login-section').classList.add('hidden');
         document.getElementById('main-interface').classList.remove('hidden');
+        const trackerPage = document.getElementById('tracker-page');
+        if (trackerPage) {
+            trackerPage.classList.add('hidden');
+        }
         document.getElementById('user-name').textContent = user.username;
     }
 
     showLoginInterface() {
         document.getElementById('login-section').classList.remove('hidden');
         document.getElementById('main-interface').classList.add('hidden');
+        const trackerPage = document.getElementById('tracker-page');
+        if (trackerPage) {
+            trackerPage.classList.add('hidden');
+        }
     }
 
     updateSessionStatus(status) {
@@ -334,7 +342,7 @@ class UiService {
     }
 
     // Upload Queue Management
-    addToUploadQueue(signalId, url, bucketName, signalName = '', screenshotData, sessionData = null, userData = null, view = null) {
+    addToUploadQueue(signalId, url, signalName = '', screenshotData, sessionData = null, userData = null, view = null) {
         // Check if session is still valid before adding to queue
         if (!screenshotData || !screenshotData.path) {
             this.showNotification('No screenshot available for upload', 'error');
@@ -364,7 +372,6 @@ class UiService {
             id: Date.now(),
             signalId,
             url,
-            bucketName,
             signalName,
             sportId,
             assignedUserId,
@@ -567,13 +574,12 @@ class UiService {
     }
 
     async uploadScreenshotBackground(queueItem) {
-        const { signalId, url, bucketName, sportId, assignedUserId, filePath } = queueItem;
+        const { signalId, url, sportId, assignedUserId, filePath } = queueItem;
         try {
             console.log('Starting background upload for queue item:', queueItem.id);
             console.log('Queue item data:', {
                 signalId,
                 url,
-                bucketName,
                 sportId,
                 assignedUserId,
                 filePath
@@ -691,6 +697,13 @@ class UiService {
             
             // Save detectedLinkId to queueItem for retry functionality
             queueItem.detectedLinkId = linkResult.data.id;
+            if (typeof window !== 'undefined' && window.dispatchEvent && queueItem.detectedLinkId) {
+                window.dispatchEvent(
+                    new CustomEvent('tracker-link-created', {
+                        detail: { detectedLinkId: queueItem.detectedLinkId, url: queueItem.url }
+                    })
+                );
+            }
             
             // Continue with upload (uploadScreenshotWithExistingLink handles success/error)
             await this.uploadScreenshotWithExistingLink(queueItem);
@@ -707,19 +720,25 @@ class UiService {
     }
 
     async uploadScreenshotWithExistingLink(queueItem) {
-        const { filePath, detectedLinkId, bucketName } = queueItem;
-        
+        const { filePath, detectedLinkId } = queueItem;
+
         try {
             // Step 1: Skip backup for speed (file already preserved in screenshots folder)
             console.log('📁 File already preserved in screenshots folder:', filePath);
-            
-            // Step 2: Upload screenshot with existing detected_link_id
+
+            // Step 2: Upload screenshot (backend resolves storage; only file + detected_link_id)
             const uploadData = {
-                filePath: filePath,
-                detectedLinkId: detectedLinkId,
-                bucketName: bucketName
+                filePath,
+                detectedLinkId
             };
-            
+            if (typeof window !== 'undefined' && window.dispatchEvent) {
+                window.dispatchEvent(
+                    new CustomEvent('tracker-upload-started', {
+                        detail: { detectedLinkId, url: queueItem.url }
+                    })
+                );
+            }
+
             console.log('📤 Uploading screenshot with data:', uploadData);
             const { ipcRenderer } = require('electron');
             const uploadResult = await ipcRenderer.invoke('upload-screenshot', uploadData);
@@ -734,9 +753,30 @@ class UiService {
                 this.scheduleQueueItemRemoval(queueItem.id, 5000);
                 
                 // Show success notification (from queue - will appear on left side)
-                this.showNotification(`✅ Screenshot uploaded successfully to folder: ${bucketName}!`, 'success', true);
-                this.showNotification(`📁 Local file kept: ${filePath}`, 'info', true);
+                this.showNotification('✅ Screenshot uploaded successfully.', 'success', true);
                 console.log('✅ Upload completed successfully');
+                if (typeof window !== 'undefined' && window.dispatchEvent) {
+                    const imgId = uploadResult.data?.id;
+                    const cmd = uploadResult.data?.command;
+                    window.dispatchEvent(
+                        new CustomEvent('tracker-upload-finished', {
+                            detail: {
+                                detectedLinkId,
+                                imageId: imgId,
+                                command: cmd,
+                                success: true
+                            }
+                        })
+                    );
+                    if (imgId && cmd?.command_id) {
+                        window.dispatchEvent(
+                            new CustomEvent('tracker-image-command', {
+                                detail: { imageId: imgId, commandId: cmd.command_id }
+                            })
+                        );
+                    }
+                    window.dispatchEvent(new CustomEvent('detected-link-updated'));
+                }
                 console.log('📁 Original file preserved:', filePath);
                 
                 // Auto-minimize logic:
@@ -755,6 +795,13 @@ class UiService {
                 queueItem.status = 'error';
                 queueItem.error = 'Upload failed: ' + uploadResult.error;
                 this.updateQueueDisplay();
+                if (typeof window !== 'undefined' && window.dispatchEvent) {
+                    window.dispatchEvent(
+                        new CustomEvent('tracker-upload-finished', {
+                            detail: { detectedLinkId, success: false }
+                        })
+                    );
+                }
                 
                 // Show error popup with URL and details
                 this.showErrorPopupWithDetails(queueItem);
@@ -765,6 +812,13 @@ class UiService {
             queueItem.status = 'error';
             queueItem.error = 'Failed to upload: ' + error.message;
             this.updateQueueDisplay();
+            if (typeof window !== 'undefined' && window.dispatchEvent) {
+                window.dispatchEvent(
+                    new CustomEvent('tracker-upload-finished', {
+                        detail: { detectedLinkId, success: false }
+                    })
+                );
+            }
             
             // Show error popup with URL and details
             this.showErrorPopupWithDetails(queueItem);
@@ -794,7 +848,6 @@ class UiService {
                         <p class="error-message">This URL already exists in the database.</p>
                         <div class="error-details">
                             <p>🔗 <strong>URL:</strong> ${queueItem.url}</p>
-                            <p>📁 <strong>Bucket:</strong> ${queueItem.bucketName}</p>
                             <p>📝 <strong>What would you like to do?</strong></p>
                             <p>You can continue and upload the screenshot to the existing detected link (e.g., if you closed the app before uploading), or cancel this upload.</p>
                         </div>
@@ -923,11 +976,17 @@ class UiService {
             console.log('🔄 Retrying upload for detected link ID:', queueItem.detectedLinkId);
             
             const uploadData = {
-                filePath: filePath,
-                detectedLinkId: queueItem.detectedLinkId,
-                bucketName: queueItem.bucketName
+                filePath,
+                detectedLinkId: queueItem.detectedLinkId
             };
-            
+            if (typeof window !== 'undefined' && window.dispatchEvent) {
+                window.dispatchEvent(
+                    new CustomEvent('tracker-upload-started', {
+                        detail: { detectedLinkId: queueItem.detectedLinkId, url: queueItem.url }
+                    })
+                );
+            }
+
             console.log('📤 Retrying upload with data:', uploadData);
             const uploadResult = await ipcRenderer.invoke('upload-screenshot', uploadData);
             
@@ -941,13 +1000,42 @@ class UiService {
                 this.scheduleQueueItemRemoval(queueItem.id, 5000);
                 
                 // Show success notification (from queue - will appear on left side)
-                this.showNotification(`✅ Retry successful! Screenshot uploaded to folder: ${queueItem.bucketName}!`, 'success', true);
+                this.showNotification('✅ Retry successful! Screenshot uploaded.', 'success', true);
                 console.log('✅ Retry upload completed successfully');
+                if (typeof window !== 'undefined' && window.dispatchEvent) {
+                    const imgId = uploadResult.data?.id;
+                    const cmd = uploadResult.data?.command;
+                    window.dispatchEvent(
+                        new CustomEvent('tracker-upload-finished', {
+                            detail: {
+                                detectedLinkId: queueItem.detectedLinkId,
+                                imageId: imgId,
+                                command: cmd,
+                                success: true
+                            }
+                        })
+                    );
+                    if (imgId && cmd?.command_id) {
+                        window.dispatchEvent(
+                            new CustomEvent('tracker-image-command', {
+                                detail: { imageId: imgId, commandId: cmd.command_id }
+                            })
+                        );
+                    }
+                    window.dispatchEvent(new CustomEvent('detected-link-updated'));
+                }
             } else {
                 // Error - update queue item
                 queueItem.status = 'error';
                 queueItem.error = 'Retry failed: ' + uploadResult.error;
                 this.updateQueueDisplay();
+                if (typeof window !== 'undefined' && window.dispatchEvent) {
+                    window.dispatchEvent(
+                        new CustomEvent('tracker-upload-finished', {
+                            detail: { detectedLinkId: queueItem.detectedLinkId, success: false }
+                        })
+                    );
+                }
                 
                 // Show error popup with details
                 this.showErrorPopupWithDetails(queueItem);
@@ -958,6 +1046,13 @@ class UiService {
             queueItem.status = 'error';
             queueItem.error = 'Retry failed: ' + error.message;
             this.updateQueueDisplay();
+            if (typeof window !== 'undefined' && window.dispatchEvent) {
+                window.dispatchEvent(
+                    new CustomEvent('tracker-upload-finished', {
+                        detail: { detectedLinkId: queueItem.detectedLinkId, success: false }
+                    })
+                );
+            }
             
             // Show error popup with details
             this.showErrorPopupWithDetails(queueItem);
@@ -987,7 +1082,6 @@ class UiService {
                     <div class="error-details">
                         <p>🔗 <strong>Failed URL:</strong></p>
                         <p class="error-url">${queueItem.url}</p>
-                        <p>📁 <strong>Bucket:</strong> ${queueItem.bucketName}</p>
                         <p>⏰ <strong>Time:</strong> ${queueItem.timestamp.toLocaleString()}</p>
                         <p>📝 <strong>What to do?</strong></p>
                         <p>Check your internet connection and try again, or contact support if the problem persists.</p>

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en-GB">
   <head>
     <meta charset="UTF-8" />
@@ -79,7 +79,7 @@
                     </div>
                   </div>
                   <div class="form-group">
-                    <label for="sport">Sport</label>
+                    <label for="sport">league & match name</label>
                     <div class="sport-container">
                       <input
                         type="text"
@@ -330,25 +330,52 @@
                   </div>
                 </div>
                 <div class="form-row">
-                  <div class="form-group">
-                    <label for="bucket-name">📁 Storage Folder</label>
-                    <input
-                      type="text"
-                      id="bucket-name"
-                      class="form-control"
-                      placeholder="Auto-generated from region, date, and sport"
-                      readonly
-                      style="background-color: #f8f9fa; cursor: not-allowed"
-                    />
+                  <div
+                    class="form-group"
+                    id="link-tracker-group"
+                    style="width: 100%"
+                  >
+                    <label>Tracker Link &amp; Trang Thai Anh</label>
+                    <div id="link-image-tracker" class="link-image-tracker">
+                      <div id="tracker-meta-line" class="tracker-meta-line">
+                        —
+                      </div>
+                      <div class="link-tracker-table-wrap">
+                        <table
+                          class="link-tracker-table"
+                          aria-label="Detected link images"
+                        >
+                          <thead>
+                            <tr>
+                              <th scope="col" class="link-tracker-col-stt">
+                                STT
+                              </th>
+                              <th scope="col">Domain</th>
+                              <th scope="col">Trạng thái ảnh</th>
+                            </tr>
+                          </thead>
+                          <tbody id="link-tracker-table-body">
+                            <tr class="link-tracker-placeholder">
+                              <td colspan="3">
+                                Bắt đầu session để theo dõi link
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
                     <small class="form-help">
-                      💡 <strong>Hướng dẫn:</strong><br />
-                      • <code>b1</code> → file lưu trong folder b1<br />
-                      • <code>b1/b2</code> → file lưu trong folder b2 (bên trong
-                      b1)<br />
-                      • <code>match_20241201</code> → file lưu trong folder
-                      match_20241201<br />
-                      • <strong>Mặc định:</strong> tên_trận_YYYYMMDD
+                      Tracker là danh sách các link đã create detected link và
+                      upload ảnh trong session hiện tại.
                     </small>
+                    <div style="margin-top: 8px; text-align: right">
+                      <button
+                        id="open-tracker-view-btn"
+                        class="btn btn-secondary btn-sm"
+                      >
+                        View Tracker
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div class="screenshot-actions">
@@ -362,6 +389,39 @@
                     ❌ Cancel
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tracker Page -->
+          <div id="tracker-page" class="section hidden">
+            <div class="tracker-page-header">
+              <h3>Tracker</h3>
+              <button id="tracker-back-btn" class="btn btn-secondary">
+                Back to Step 2
+              </button>
+            </div>
+            <div class="tracker-page-content">
+              <div class="tracker-page-meta" id="tracker-page-meta">
+                Danh sách tracker: 0 link
+              </div>
+              <div class="tracker-page-table-wrap">
+                <table class="tracker-page-table" aria-label="Tracker list">
+                  <thead>
+                    <tr>
+                      <th scope="col" class="tracker-page-col-stt">STT</th>
+                      <th scope="col">URL</th>
+                      <th scope="col">Trạng thái ảnh</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tracker-page-table-body">
+                    <tr class="link-tracker-placeholder">
+                      <td colspan="3">
+                        Chưa có link nào được create/upload trong session.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>

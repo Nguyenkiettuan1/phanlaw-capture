@@ -89,28 +89,41 @@ body {
 }
 
 /* Login Section */
+#login-section {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    margin-bottom: 0;
+    padding: 24px;
+    min-height: calc(100vh - 140px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .login-container {
-    max-width: 450px;
-    margin: 0 auto;
+    width: 100%;
+    max-width: 420px;
+    margin: 0;
     text-align: center;
     background: white;
-    padding: 50px;
-    border-radius: 20px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    border: 1px solid #e9ecef;
+    padding: 36px 32px;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    border: 1px solid #dfe5ee;
 }
 
 .login-container h2 {
-    margin-bottom: 40px;
-    color: #333;
-    font-size: 28px;
+    margin-bottom: 28px;
+    color: #1f2937;
+    font-size: 30px;
     font-weight: 700;
 }
 
 .login-form {
     display: flex;
     flex-direction: column;
-    gap: 25px;
+    gap: 16px;
 }
 
 .login-form .form-group {
@@ -119,51 +132,55 @@ body {
 
 .login-form .form-group label {
     display: block;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     font-weight: 600;
-    color: #555;
-    font-size: 14px;
+    color: #4b5563;
+    font-size: 12px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.4px;
+    text-align: left;
 }
 
 .login-form .form-group input {
     width: 100%;
-    padding: 16px 20px;
-    border: 2px solid #e1e5e9;
-    border-radius: 12px;
-    font-size: 16px;
-    background: #f8f9fa;
+    padding: 12px 14px;
+    border: 1px solid #cfd8e3;
+    border-radius: 8px;
+    font-size: 14px;
+    background: #fff;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .login-form .form-group input:focus {
     outline: none;
-    border-color: #667eea;
-    background: white;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
 
 .login-form .form-group input:valid {
-    border-color: #56ab2f;
+    border-color: #cfd8e3;
 }
 
 .login-form button {
     width: 100%;
-    padding: 16px;
-    background: #3498db;
+    padding: 12px 16px;
+    background: #2f80ed;
     color: white;
     border: none;
-    border-radius: 12px;
-    font-size: 16px;
-    font-weight: 600;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 700;
     cursor: pointer;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
 }
 
 .login-form button:hover {
-    background: #2980b9;
+    background: #1f6fd8;
 }
 
 .login-form button:active {
-    background: #21618c;
+    background: #1a5db4;
 }
 
 /* Loading animation for login button */
@@ -459,22 +476,52 @@ input[type="time"]::-webkit-calendar-picker-indicator {
 .workflow-container {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 30px;
+    gap: 22px;
+    align-items: start;
 }
 
 .workflow-step {
     background: #ffffff;
     border-radius: 10px;
-    padding: 25px;
+    padding: 20px;
     border-left: 4px solid #3498db;
     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+/* Step 2 visual scale-up for better balance/readability */
+.workflow-step:nth-child(2) .step-content {
+    gap: 16px;
+}
+
+.workflow-step:nth-child(2) .form-group label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #3f4956;
+}
+
+.workflow-step:nth-child(2) .form-help {
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.workflow-step:nth-child(2) .form-control {
+    min-height: 42px;
+    font-size: 14px;
+    padding: 10px 12px;
+}
+
+.workflow-step:nth-child(2) .screenshot-actions .btn {
+    min-height: 42px;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 10px 16px;
 }
 
 .step-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 14px;
 }
 
 .step-header h3 {
@@ -2088,9 +2135,6 @@ label:has(input[name="social-media-platform"]:checked) {
 }
 
 /* Sport Selection Component Styles */
-.sport-selection-component {
-  /* Removed animation for speed */
-}
 
 /* Loading indicator for sport table */
 .sport-table-loading {
@@ -2146,9 +2190,6 @@ label:has(input[name="social-media-platform"]:checked) {
   border-bottom: 1px solid #e9ecef;
 }
 
-.sport-table tbody tr {
-  /* Removed transition for speed */
-}
 
 .sport-table tbody tr:hover {
   background-color: #f8f9fa;
@@ -2181,4 +2222,235 @@ label:has(input[name="social-media-platform"]:checked) {
 .sport-pagination button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Tracker style - enterprise simple */
+.link-image-tracker {
+  border: 1px solid #d9dee7;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px;
+  font-size: 13px;
+}
+
+/* Step 2: make tracker area visually larger/balanced */
+#link-tracker-group {
+  margin-top: 6px;
+}
+
+#link-tracker-group .link-image-tracker {
+  min-height: 340px;
+  display: flex;
+  flex-direction: column;
+}
+
+.tracker-meta-line {
+  font-size: 14px;
+  color: #5b6472;
+  margin-bottom: 12px;
+  word-break: break-all;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.link-tracker-table-wrap {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 360px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e2e7ef;
+  flex: 1;
+}
+
+.link-tracker-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+.link-tracker-table thead th {
+  text-align: left;
+  padding: 14px 16px;
+  background: #f6f8fb;
+  color: #3e4652;
+  font-weight: 700;
+  border-bottom: 1px solid #dfe5ee;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.link-tracker-table tbody td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #edf1f6;
+  vertical-align: middle;
+  color: #1f2733;
+}
+
+.link-tracker-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.link-tracker-table tbody tr:hover td {
+  background: #fafcff;
+}
+
+.link-tracker-url {
+  word-break: break-all;
+  max-width: 420px;
+}
+
+.link-tracker-status {
+  white-space: normal;
+  min-width: 220px;
+}
+
+.tracker-status-main {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.tracker-status-time {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.9;
+  margin-top: 2px;
+}
+
+.link-tracker-col-stt {
+  width: 60px;
+  text-align: center;
+  color: #4b5563;
+}
+
+.link-tracker-table tbody .link-tracker-col-stt {
+  text-align: center;
+  font-weight: 700;
+}
+
+.link-tracker-placeholder td {
+  color: #7a8391;
+  font-style: normal;
+  text-align: center;
+}
+
+.form-group#link-tracker-group.session-active .link-image-tracker {
+  border-color: #cfd8e6;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.tracker-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e5eaf2;
+  padding-bottom: 10px;
+}
+
+.tracker-page-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.tracker-page-content {
+  background: #fff;
+  border: 1px solid #dce2ec;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.tracker-page-meta {
+  font-size: 14px;
+  color: #4b5563;
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+.tracker-page-table-wrap {
+  max-height: 65vh;
+  overflow: auto;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+}
+
+.tracker-page-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+.tracker-page-table thead th {
+  background: #f6f8fb;
+  padding: 13px 14px;
+  text-align: left;
+  border-bottom: 1px solid #dfe5ee;
+  color: #374151;
+  font-weight: 700;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.tracker-page-table tbody td {
+  padding: 13px 14px;
+  border-bottom: 1px solid #edf1f6;
+  vertical-align: top;
+  color: #1f2937;
+}
+
+.tracker-page-col-stt {
+  width: 72px;
+  text-align: center;
+  color: #4b5563;
+  font-weight: 700;
+}
+
+.tracker-status-default,
+.tracker-status-created,
+.tracker-status-processing,
+.tracker-status-done,
+.tracker-status-failed {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.tracker-status-default {
+  background: #f3f4f6;
+  color: #4b5563;
+  border-color: #e5e7eb;
+}
+
+.tracker-status-created {
+  background: #eef2ff;
+  color: #4338ca;
+  border-color: #c7d2fe;
+}
+
+.tracker-status-processing {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+.tracker-status-done {
+  background: #ecfdf5;
+  color: #065f46;
+  border-color: #6ee7b7;
+}
+
+.tracker-status-failed {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fecaca;
 }

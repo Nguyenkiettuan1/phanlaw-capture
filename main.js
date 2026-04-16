@@ -786,6 +786,45 @@ ipcMain.handle('check-url-exists', async (event, { url, sportId }) => {
     return await testApp.apiService.checkUrlExists(url, sportId);
 });
 
+ipcMain.handle('get-detected-link', async (event, { detectedLinkId }) => {
+    return await testApp.apiService.getDetectedLink(detectedLinkId);
+});
+
+ipcMain.handle('list-detected-link-images', async (event, { detectedLinkId, page = 1, pageSize = 100 } = {}) => {
+    return await testApp.apiService.listDetectedLinkImages(detectedLinkId, page, pageSize);
+});
+
+ipcMain.handle('get-command-status-once', async (event, { commandId }) => {
+    return await testApp.apiService.getCommandStatusOnce(commandId);
+});
+
+ipcMain.handle('open-detected-link-image-view', async (event, { imageId }) => {
+    try {
+        const token = testApp.apiService.accessToken;
+        if (!token) {
+            return { success: false, error: 'Not logged in' };
+        }
+        const viewUrl = `${config.apiBaseUrl}/detected_link_images/${encodeURIComponent(imageId)}/view`;
+        const viewer = new BrowserWindow({
+            width: 960,
+            height: 720,
+            title: 'Ảnh detected link',
+            webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true
+            }
+        });
+        await viewer.loadURL(viewUrl, {
+            extraHeaders: `Authorization: Bearer ${token}\n`
+        });
+        viewer.show();
+        return { success: true };
+    } catch (e) {
+        console.error('open-detected-link-image-view:', e);
+        return { success: false, error: e.message || String(e) };
+    }
+});
+
 ipcMain.handle('create-detected-link', async (event, data) => {
     // Extract parameters from data object (supports both camelCase and snake_case)
     const { 
@@ -804,8 +843,8 @@ ipcMain.handle('create-detected-link', async (event, data) => {
     return await testApp.apiService.createDetectedLink(url, sportId, signalId, assignedUserId, socialMediaId, view);
 });
 
-ipcMain.handle('upload-screenshot', async (event, { filePath, detectedLinkId, bucketName = 'screenshots', provider = 'GOOGLE_CLOUD' }) => {
-    return await testApp.apiService.uploadScreenshot(filePath, detectedLinkId, bucketName, provider);
+ipcMain.handle('upload-screenshot', async (event, { filePath, detectedLinkId }) => {
+    return await testApp.apiService.uploadScreenshot(filePath, detectedLinkId);
 });
 
 ipcMain.handle('create-signal', async (event, signalData) => {

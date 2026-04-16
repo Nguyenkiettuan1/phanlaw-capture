@@ -37,13 +37,7 @@ class SessionService {
             socialMediaRadios.forEach(radio => {
                 radio.disabled = true;
             });
-            
-            // Disable bucket name input
-            const bucketInput = document.getElementById('bucket-name');
-            if (bucketInput) {
-                bucketInput.disabled = true;
-            }
-            
+
             // Show stop session button
             document.getElementById('stop-session-btn').classList.remove('hidden');
             
@@ -68,19 +62,10 @@ class SessionService {
             socialMediaRadios.forEach(radio => {
                 radio.disabled = false;
             });
-            
-            // Enable bucket name input (though it's readonly)
-            const bucketInput = document.getElementById('bucket-name');
-            if (bucketInput) {
-                bucketInput.disabled = false;
-            }
-            
+
             // Hide stop session button
             document.getElementById('stop-session-btn').classList.add('hidden');
-            
-            // Clear bucket name
-            document.getElementById('bucket-name').value = '';
-            
+
             return { success: true };
         } catch (error) {
             return { success: false, error: error.message };
@@ -148,8 +133,7 @@ class SessionService {
         document.getElementById('sport').value = '';
         document.getElementById('signal').value = '';
         document.getElementById('url').value = '';
-        document.getElementById('bucket-name').value = '';
-        
+
         // Clear input fields
         document.getElementById('region').value = '';
         document.getElementById('sport').value = '';
