@@ -514,12 +514,51 @@ class TestAutomationApp {
         return this.currentSessionData;
     }
 
+    async canTakeScreenshot() {
+        const sessionData = this.getCurrentSessionData();
+        if (!sessionData) {
+            this.mainWindow.webContents.send('screenshot-failed', {
+                error: 'Please start a session first.'
+            });
+            return false;
+        }
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        try {
+            const response = await fetch(config.healthUrl, {
+                method: 'GET',
+                cache: 'no-store',
+                signal: controller.signal
+            });
+            if (!response.ok) {
+                this.mainWindow.webContents.send('screenshot-failed', {
+                    error: 'Cannot take screenshot while server is unavailable.'
+                });
+                return false;
+            }
+            return true;
+        } catch (error) {
+            this.mainWindow.webContents.send('screenshot-failed', {
+                error: 'Cannot take screenshot while offline or server is unavailable.'
+            });
+            return false;
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    }
+
 
 
 
     async takeScreenshot() {
         try {
             console.log('Taking screenshot...');
+
+            const canTake = await this.canTakeScreenshot();
+            if (!canTake) {
+                return;
+            }
             
             // Check if popup is currently visible - prevent screenshot if popup is open
             const isPopupVisible = await this.checkPopupVisible();
@@ -961,9 +1000,10 @@ ipcMain.handle('close-window', async (event) => {
 ipcMain.handle('get-config', async (event) => {
     return {
         apiBaseUrl: config.apiBaseUrl,
+        healthUrl: config.healthUrl,
         nodeEnv: config.nodeEnv,
         backendHost: config.backendHost,
-        backendPort: config.backendPort
+        backendPath: config.backendPath
     };
 });
 

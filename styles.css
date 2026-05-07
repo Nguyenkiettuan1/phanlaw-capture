@@ -635,6 +635,45 @@ input[type="time"]::-webkit-calendar-picker-indicator {
     box-shadow: 0 10px 30px rgba(0,0,0,0.3);
 }
 
+.offline-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(12, 18, 30, 0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 21000;
+    padding: 20px;
+}
+
+.offline-card {
+    width: min(560px, 96%);
+    background: #ffffff;
+    border-radius: 14px;
+    border: 1px solid #dbe3f1;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.28);
+    padding: 28px 24px;
+}
+
+.offline-card h2 {
+    margin: 0 0 12px;
+    font-size: 24px;
+    color: #1f2937;
+}
+
+.offline-card p {
+    margin: 0 0 20px;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #4b5563;
+}
+
+.offline-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
 .spinner {
     width: 40px;
     height: 40px;

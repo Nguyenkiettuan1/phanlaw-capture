@@ -23,6 +23,7 @@ class TestAutomationDesktopApp {
         this.urlWarningElement = null;
         this.currentWarnedUrl = null;
         this.urlCheckDebounce = null;
+        this.healthUrl = `${this.apiBaseUrl.replace(/\/api\/v1\/?$/i, '')}/health`;
 
         // Tracker table: optional live async command status per detected_link_image row
         this.linkTrackerCommandByImageId = new Map();
@@ -31,6 +32,9 @@ class TestAutomationDesktopApp {
         this.trackerEntryByDetectedLinkId = new Map();
         this.trackerImageToDetectedLinkId = new Map();
         this.trackerNextStt = 1;
+        this.healthCheckTimer = null;
+        this.healthCheckInProgress = false;
+        this.isOfflineOverlayVisible = false;
         
         // Initialize services
         this.uiService = new UiService();
@@ -48,7 +52,9 @@ class TestAutomationDesktopApp {
         await this.loadEnvironment();
         this.bindEvents();
         this.setupWindowControls();
+        this.updateCaptureControls();
         this.checkConnection();
+        this.startHealthMonitor();
     }
 
     async loadEnvironment() {
@@ -56,6 +62,9 @@ class TestAutomationDesktopApp {
             // Get config from main process
             const config = await ipcRenderer.invoke('get-config');
             this.apiBaseUrl = config.apiBaseUrl;
+            if (config.healthUrl) {
+                this.healthUrl = config.healthUrl;
+            }
             console.log('🔧 Loaded config from main process:', config);
             console.log('🌐 API Base URL:', this.apiBaseUrl);
         } catch (error) {
@@ -226,6 +235,32 @@ class TestAutomationDesktopApp {
 
         document.getElementById('popup-open-location-btn').addEventListener('click', () => {
             this.openScreenshotLocation();
+        });
+
+        const offlineRetryBtn = document.getElementById('offline-retry-btn');
+        if (offlineRetryBtn) {
+            offlineRetryBtn.addEventListener('click', () => {
+                this.runHealthCheckNow();
+            });
+        }
+        const offlineReloadBtn = document.getElementById('offline-reload-btn');
+        if (offlineReloadBtn) {
+            offlineReloadBtn.addEventListener('click', () => {
+                window.location.reload();
+            });
+        }
+
+        window.addEventListener('offline', () => {
+            this.showOfflineOverlay('No internet connection detected. Please reconnect your network.');
+        });
+        window.addEventListener('online', () => {
+            this.runHealthCheckNow();
+        });
+        window.addEventListener('beforeunload', () => {
+            if (this.healthCheckTimer) {
+                clearInterval(this.healthCheckTimer);
+                this.healthCheckTimer = null;
+            }
         });
 
         // IPC events from main process (optimized for speed)
@@ -975,6 +1010,93 @@ class TestAutomationDesktopApp {
         } catch (error) {
             console.log('Python hybrid server not running or not logged in');
         }
+    }
+
+    startHealthMonitor() {
+        if (this.healthCheckTimer) {
+            clearInterval(this.healthCheckTimer);
+            this.healthCheckTimer = null;
+        }
+
+        this.runHealthCheckNow();
+        this.healthCheckTimer = setInterval(() => {
+            this.runHealthCheckNow();
+        }, 10000);
+    }
+
+    async runHealthCheckNow() {
+        if (this.healthCheckInProgress) return;
+        this.healthCheckInProgress = true;
+        try {
+            const healthy = await this.checkServerHealth();
+            if (healthy) {
+                this.hideOfflineOverlay();
+            } else {
+                this.showOfflineOverlay('Server is unreachable (/health failed). Please check backend and network.');
+            }
+        } finally {
+            this.healthCheckInProgress = false;
+        }
+    }
+
+    async checkServerHealth() {
+        if (!navigator.onLine) {
+            return false;
+        }
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        try {
+            const response = await fetch(this.healthUrl, {
+                method: 'GET',
+                cache: 'no-store',
+                signal: controller.signal
+            });
+            return response.ok;
+        } catch (error) {
+            return false;
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    }
+
+    showOfflineOverlay(message) {
+        const overlay = document.getElementById('offline-overlay');
+        const messageEl = document.getElementById('offline-message');
+        if (!overlay) return;
+
+        if (messageEl && message) {
+            messageEl.textContent = message;
+        }
+        overlay.classList.remove('hidden');
+        this.isOfflineOverlayVisible = true;
+        this.updateCaptureControls();
+    }
+
+    hideOfflineOverlay() {
+        const overlay = document.getElementById('offline-overlay');
+        if (!overlay) return;
+
+        overlay.classList.add('hidden');
+        this.isOfflineOverlayVisible = false;
+        this.updateCaptureControls();
+    }
+
+    canCaptureScreenshot() {
+        const isSessionActive = this.sessionService && this.sessionService.isSessionActive();
+        return Boolean(isSessionActive && navigator.onLine && !this.isOfflineOverlayVisible);
+    }
+
+    updateCaptureControls() {
+        const captureBtn = document.getElementById('take-screenshot-btn');
+        if (!captureBtn) return;
+
+        const canCapture = this.canCaptureScreenshot();
+        captureBtn.disabled = !canCapture;
+        captureBtn.title = canCapture
+            ? 'Take screenshot'
+            : 'Start session and ensure network/server connection before taking screenshot';
     }
 
     async handleLogin() {
@@ -2279,6 +2401,7 @@ class TestAutomationDesktopApp {
                 await ipcRenderer.invoke('set-session-data', sessionData);
                 console.log('✅ Session data sent to main process:', sessionData);
                 this.refreshLinkTracker();
+                this.updateCaptureControls();
             } else {
                 this.showNotification('Failed to start session: ' + result.error, 'error');
             }
@@ -2376,7 +2499,11 @@ class TestAutomationDesktopApp {
                 // Update UI
                 this.updateSessionStatus('Not Started');
                 this.showNotification('Session stopped. You can start a new session.', 'info');
+                ipcRenderer.invoke('set-session-data', null).catch((e) => {
+                    console.error('Failed to clear session data in main process:', e);
+                });
                 this.resetLinkTracker();
+                this.updateCaptureControls();
             } else {
                 this.showNotification('Failed to stop session: ' + result.error, 'error');
             }
@@ -2665,8 +2792,12 @@ class TestAutomationDesktopApp {
     }
 
     async takeScreenshot() {
-        if (!this.sessionService.isSessionActive()) {
-            this.showNotification('Please start a session first', 'error');
+        if (!this.canCaptureScreenshot()) {
+            if (!this.sessionService.isSessionActive()) {
+                this.showNotification('Please start a session first', 'error');
+            } else {
+                this.showNotification('Cannot take screenshot while offline or server is unavailable', 'error');
+            }
             return;
         }
 

@@ -25,6 +25,11 @@ const colors = {
     cyan: '\x1b[36m',
 };
 
+const RELEASE_REPOS = [
+    'Nguyenkiettuan1/electron_desktop_app',
+    'phanlaw/electron_desktop_app'
+];
+
 function log(message, color = 'reset') {
     console.log(`${colors[color]}${message}${colors.reset}`);
 }
@@ -37,6 +42,16 @@ function exec(command, silent = false) {
     } catch (error) {
         log(`❌ Error: ${error.message}`, 'red');
         process.exit(1);
+    }
+}
+
+function execSafe(command, silent = false) {
+    try {
+        const output = execSync(command, { encoding: 'utf8' });
+        if (!silent) console.log(output);
+        return { success: true, output: output.trim() };
+    } catch (error) {
+        return { success: false, error: error.message };
     }
 }
 
@@ -135,6 +150,13 @@ function performRelease(pkg, oldVersion, newVersion) {
         log('\n📝 Step 3: Pushing to GitHub...', 'cyan');
         exec('git push origin main');
         exec('git push origin --tags');
+
+        const hasPhanlawRemote = execSafe('git remote get-url phanlaw', true).success;
+        if (hasPhanlawRemote) {
+            exec('git push phanlaw main');
+            exec('git push phanlaw --tags');
+            log('✅ Pushed to phanlaw remote', 'green');
+        }
         log('✅ Pushed to GitHub', 'green');
         
         // Step 4: Build app
@@ -185,7 +207,7 @@ function performRelease(pkg, oldVersion, newVersion) {
             
             const releaseNotes = notes || `Release v${newVersion}\n\nBug fixes and improvements.`;
             
-            // Step 7: Create GitHub Release
+            // Step 7: Create GitHub Releases (both repositories)
             log('\n📝 Step 7: Creating GitHub Release...', 'cyan');
             
             // Escape file paths with quotes for PowerShell/Windows
@@ -193,18 +215,20 @@ function performRelease(pkg, oldVersion, newVersion) {
             const blockmapPath = path.join(distDir, blockmapFile);
             const ymlPath = path.join(distDir, ymlFile);
             
-            // Use quotes around file paths to handle spaces
-            const releaseCmd = `gh release create v${newVersion} ` +
-                `"${exePath}" ` +
-                `"${blockmapPath}" ` +
-                `"${ymlPath}" ` +
-                `--title "Version ${newVersion}" ` +
-                `--notes "${releaseNotes.replace(/"/g, '\\"')}"`;
-            
             try {
-                exec(releaseCmd);
-                log(`✅ GitHub Release created: v${newVersion}`, 'green');
-                log(`🔗 https://github.com/Nguyenkiettuan1/phanlaw-capture/releases/tag/v${newVersion}`, 'blue');
+                const escapedNotes = releaseNotes.replace(/"/g, '\\"');
+                for (const repo of RELEASE_REPOS) {
+                    const releaseCmd = `gh release create v${newVersion} ` +
+                        `"${exePath}" ` +
+                        `"${blockmapPath}" ` +
+                        `"${ymlPath}" ` +
+                        `--repo "${repo}" ` +
+                        `--title "Version ${newVersion}" ` +
+                        `--notes "${escapedNotes}"`;
+                    exec(releaseCmd);
+                    log(`✅ GitHub Release created on ${repo}: v${newVersion}`, 'green');
+                    log(`🔗 https://github.com/${repo}/releases/tag/v${newVersion}`, 'blue');
+                }
                 
                 log('\n🎉 Release completed successfully!', 'green');
                 log(`\n📦 Users can now download v${newVersion}`, 'cyan');
@@ -213,9 +237,11 @@ function performRelease(pkg, oldVersion, newVersion) {
             } catch (error) {
                 log('\n❌ Failed to create GitHub Release', 'red');
                 log('You can create it manually:', 'yellow');
-                log(`  1. Go to: https://github.com/Nguyenkiettuan1/phanlaw-capture/releases/new`, 'yellow');
-                log(`  2. Tag: v${newVersion}`, 'yellow');
-                log(`  3. Upload files from dist/ folder`, 'yellow');
+                RELEASE_REPOS.forEach((repo, index) => {
+                    log(`  ${index + 1}. Go to: https://github.com/${repo}/releases/new`, 'yellow');
+                    log(`     Tag: v${newVersion}`, 'yellow');
+                    log(`     Upload files from dist/ folder`, 'yellow');
+                });
             }
         });
         

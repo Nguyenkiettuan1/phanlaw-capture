@@ -614,6 +614,20 @@
       </div>
     </div>
 
+    <!-- Offline / Server Down Overlay -->
+    <div id="offline-overlay" class="offline-overlay hidden">
+      <div class="offline-card">
+        <h2>Connection Lost</h2>
+        <p id="offline-message">
+          Cannot connect to server. Please check your network and server status.
+        </p>
+        <div class="offline-actions">
+          <button id="offline-retry-btn" class="btn btn-secondary">Retry</button>
+          <button id="offline-reload-btn" class="btn btn-primary">Reload App</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Upload Queue -->
     <div id="upload-queue" class="upload-queue hidden">
       <div class="queue-header">

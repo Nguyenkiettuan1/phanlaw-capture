@@ -22,6 +22,11 @@ const colors = {
     cyan: '\x1b[36m',
 };
 
+const RELEASE_REPOS = [
+    'Nguyenkiettuan1/electron_desktop_app',
+    'phanlaw/electron_desktop_app'
+];
+
 function log(message, color = 'reset') {
     console.log(`${colors[color]}${message}${colors.reset}`);
 }
@@ -135,6 +140,11 @@ function performRelease(pkg, oldVersion, newVersion) {
         // Create new tag (or recreate if was deleted)
         exec(`git tag v${newVersion}`);
         exec('git push origin main --tags');
+        const hasPhanlawRemote = execSafe('git remote get-url phanlaw', true).success;
+        if (hasPhanlawRemote) {
+            exec('git push phanlaw main --tags');
+            log('✅ Pushed to phanlaw remote', 'green');
+        }
         log('✅ Git updated', 'green');
         
         // Step 3: Build portable app
@@ -200,28 +210,35 @@ function performRelease(pkg, oldVersion, newVersion) {
                 log('⚠️  GitHub CLI not authenticated', 'yellow');
                 log('Please run: gh auth login', 'yellow');
                 log('\n📝 Manual upload instructions:', 'cyan');
-                log(`  1. Go to: https://github.com/Nguyenkiettuan1/phanlaw-capture/releases/new`, 'yellow');
-                log(`  2. Tag: v${newVersion}`, 'yellow');
-                log(`  3. Title: Version ${newVersion} - Portable`, 'yellow');
-                log(`  4. Upload files:`, 'yellow');
-                log(`     - ${zipFile}`, 'yellow');
-                log(`     - ${ymlFile}`, 'yellow');
-                log(`  5. Release notes:`, 'yellow');
-                log(`     ${releaseNotes.replace(/\n/g, '\n     ')}`, 'yellow');
+                RELEASE_REPOS.forEach((repo, index) => {
+                    log(`  ${index + 1}. Go to: https://github.com/${repo}/releases/new`, 'yellow');
+                    log(`     Tag: v${newVersion}`, 'yellow');
+                    log(`     Title: Version ${newVersion} - Portable`, 'yellow');
+                    log(`     Upload files:`, 'yellow');
+                    log(`       - ${zipFile}`, 'yellow');
+                    log(`       - ${ymlFile}`, 'yellow');
+                    log(`     Release notes:`, 'yellow');
+                    log(`       ${releaseNotes.replace(/\n/g, '\n       ')}`, 'yellow');
+                });
                 return; // Continue anyway, files are ready
             }
             
             try {
-                const releaseCmd = `gh release create v${newVersion} ` +
-                    `"${zipFile}" ` +
-                    `"${ymlFile}" ` +
-                    `--title "Version ${newVersion} - Portable" ` +
-                    `--notes "${releaseNotes}"`;
-                
-                exec(releaseCmd);
+                const escapedNotes = releaseNotes.replace(/"/g, '\\"');
+                for (const repo of RELEASE_REPOS) {
+                    const releaseCmd = `gh release create v${newVersion} ` +
+                        `"${zipFile}" ` +
+                        `"${ymlFile}" ` +
+                        `--repo "${repo}" ` +
+                        `--title "Version ${newVersion} - Portable" ` +
+                        `--notes "${escapedNotes}"`;
+                    
+                    exec(releaseCmd);
+                    log(`✅ Release created on ${repo}`, 'green');
+                    log(`🔗 https://github.com/${repo}/releases/tag/v${newVersion}`, 'blue');
+                }
                 
                 log('\n🎉 Release completed!', 'green');
-                log(`🔗 https://github.com/Nguyenkiettuan1/phanlaw-capture/releases/tag/v${newVersion}`, 'blue');
                 log('\n📦 Users can now:', 'cyan');
                 log('  1. Download zip file', 'yellow');
                 log('  2. Extract and run', 'yellow');
@@ -230,9 +247,11 @@ function performRelease(pkg, oldVersion, newVersion) {
             } catch (error) {
                 log('\n❌ GitHub Release failed', 'red');
                 log('Create manually:', 'yellow');
-                log(`  1. Go to: https://github.com/Nguyenkiettuan1/phanlaw-capture/releases/new`, 'yellow');
-                log(`  2. Tag: v${newVersion}`, 'yellow');
-                log(`  3. Upload: ${zipFile} and ${ymlFile}`, 'yellow');
+                RELEASE_REPOS.forEach((repo, index) => {
+                    log(`  ${index + 1}. Go to: https://github.com/${repo}/releases/new`, 'yellow');
+                    log(`     Tag: v${newVersion}`, 'yellow');
+                    log(`     Upload: ${zipFile} and ${ymlFile}`, 'yellow');
+                });
             }
         });
         
