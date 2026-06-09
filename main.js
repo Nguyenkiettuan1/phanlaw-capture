@@ -723,33 +723,71 @@ class TestAutomationApp {
         }
     }
 
+    focusMainWindow() {
+        if (!this.mainWindow) return;
+
+        if (this.mainWindow.isMinimized()) {
+            this.mainWindow.restore();
+        }
+        if (!this.mainWindow.isVisible()) {
+            this.mainWindow.show();
+        }
+        this.mainWindow.focus();
+    }
+
+    notifyAlreadyRunning() {
+        this.focusMainWindow();
+        dialog.showMessageBoxSync(this.mainWindow, {
+            type: 'info',
+            title: 'Ứng dụng đang chạy',
+            message: 'Test Automation Screen Auto đã được mở.',
+            detail: 'Chỉ có thể chạy một phiên bản tại một thời điểm. Cửa sổ hiện tại đã được đưa lên trước.',
+            buttons: ['OK'],
+            defaultId: 0
+        });
+    }
+
 }
 
 // Create app instance
 const testApp = new TestAutomationApp();
 
-// App event handlers
-app.whenReady().then(async () => {
-    await testApp.startPythonServer();
-    testApp.createWindow();
-});
+// Allow only one app instance
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
-app.on('window-all-closed', async () => {
-    await testApp.stopPythonServer();
-    if (process.platform !== 'darwin') {
-        app.quit();
-    }
-});
+if (!gotSingleInstanceLock) {
+    app.quit();
+} else {
+    app.on('second-instance', () => {
+        console.log('⚠️ Second instance blocked — app is already running');
+        testApp.notifyAlreadyRunning();
+    });
 
-app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    // App event handlers
+    app.whenReady().then(async () => {
+        await testApp.startPythonServer();
         testApp.createWindow();
-    }
-});
+    });
 
-app.on('will-quit', () => {
-    globalShortcut.unregisterAll();
-});
+    app.on('window-all-closed', async () => {
+        await testApp.stopPythonServer();
+        if (process.platform !== 'darwin') {
+            app.quit();
+        }
+    });
+
+    app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length === 0) {
+            testApp.createWindow();
+        } else {
+            testApp.focusMainWindow();
+        }
+    });
+
+    app.on('will-quit', () => {
+        globalShortcut.unregisterAll();
+    });
+}
 
 // IPC handlers
 ipcMain.handle('login', async (event, credentials) => {

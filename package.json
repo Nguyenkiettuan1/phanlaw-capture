@@ -12,7 +12,9 @@
     "build-win-portable": "electron-builder --win portable",
     "build-mac": "electron-builder --mac",
     "build-mac-dmg": "electron-builder --mac dmg",
-    "build-all": "electron-builder --win --mac",
+    "build-linux": "electron-builder --linux",
+    "build-extension": "node build-extension.js",
+    "build-all": "electron-builder --win --mac --linux",
     "build-simple": "electron-builder --win --config.directories.output=dist --config.win.target=portable --config.win.sign=null",
     "pack": "electron-packager . --platform=win32 --arch=x64 --out=dist --overwrite",
     "pack-portable": "electron-packager . --platform=win32 --arch=x64 --out=dist --overwrite --asar",
@@ -54,7 +56,7 @@
     "publish": {
       "provider": "github",
       "owner": "Nguyenkiettuan1",
-      "repo": "phanlaw-capture",
+      "repo": "electron_desktop_app",
       "releaseType": "release"
     },
     "files": [
@@ -109,7 +111,16 @@
       "entitlementsInherit": null
     },
     "linux": {
-      "target": "AppImage"
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Utility",
+      "artifactName": "${productName}-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
