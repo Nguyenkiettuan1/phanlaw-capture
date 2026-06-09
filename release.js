@@ -31,6 +31,7 @@ const RELEASE_REPOS = [
 
 const WORKFLOW_NAME = 'Build and Release';
 const PRIMARY_REPO = RELEASE_REPOS[0];
+const PRIMARY_GIT_REMOTE = `https://github.com/${PRIMARY_REPO}.git`;
 
 function log(message, color = 'reset') {
     console.log(`${colors[color]}${message}${colors.reset}`);
@@ -253,16 +254,12 @@ function performRelease(pkg, oldVersion, newVersion) {
         exec(`git tag ${tagName}`);
         log(`✅ Git commit and tag created: ${tagName}`, 'green');
 
-        log('\n📝 Step 3: Pushing to GitHub...', 'cyan');
-        exec('git push origin main');
-        exec(`git push origin ${tagName}`);
-
-        const hasPhanlawRemote = execSafe('git remote get-url phanlaw').success;
-        if (hasPhanlawRemote) {
-            exec('git push phanlaw main');
-            log('✅ Pushed main branch to phanlaw remote', 'green');
-        }
-        log('✅ Tag pushed to origin (triggers multi-platform CI build)', 'green');
+        log('\n📝 Step 3: Pushing to GitHub (primary repo only)...', 'cyan');
+        log(`   Git remote: ${PRIMARY_GIT_REMOTE}`, 'blue');
+        log('   phanlaw repo will receive release files only (not git push)', 'blue');
+        exec(`git push ${PRIMARY_GIT_REMOTE} main`);
+        exec(`git push ${PRIMARY_GIT_REMOTE} ${tagName}`);
+        log('✅ Pushed main + tag (triggers multi-platform CI build)', 'green');
 
         const runId = waitForWorkflowRun(tagName);
 
