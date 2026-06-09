@@ -200,12 +200,93 @@ function createGitHubReleases(version, files, releaseNotes) {
     }
 }
 
-function main() {
+function hasGitHubRelease(version) {
+    const tagName = `v${version}`;
+    return execSafe(`gh release view ${tagName} --repo "${PRIMARY_REPO}"`).success;
+}
+
+function promptYesNo(question) {
+    const readline = require('readline').createInterface({
+        input: process.stdin,
+        output: process.stdout,
+    });
+
+    return new Promise((resolve) => {
+        readline.question(question, (answer) => {
+            readline.close();
+            resolve(answer.toLowerCase() === 'y');
+        });
+    });
+}
+
+async function finishReleaseFromCi(version, releaseNotes = null) {
+    const tagName = `v${version}`;
+    const runId = waitForWorkflowRun(tagName);
+
+    log('\n📝 Downloading built artifacts...', 'cyan');
+    const downloadDir = downloadReleaseArtifacts(runId, version);
+    const releaseFiles = collectReleaseFiles(downloadDir);
+
+    if (!releaseFiles.length) {
+        log('❌ No release files downloaded from CI', 'red');
+        process.exit(1);
+    }
+
+    validateReleaseFiles(releaseFiles, version);
+
+    const notes = releaseNotes || [
+        `Release ${tagName}`,
+        '',
+        '### Downloads',
+        '- Windows: Setup + Portable (.exe)',
+        '- Linux: AppImage',
+        '- macOS: DMG',
+        '- Browser Extension: extension.zip',
+        '',
+        '### Auto-update',
+        '- Windows: latest.yml',
+        '- Linux: latest-linux.yml',
+        '- macOS: latest-mac.yml',
+    ].join('\n');
+
+    log('\n📝 Publishing GitHub Releases (both repositories)...', 'cyan');
+    createGitHubReleases(version, releaseFiles, notes);
+
+    log('\n🎉 Release completed successfully!', 'green');
+    log(`📦 Users on Windows/Linux/macOS can install v${version}`, 'cyan');
+    log('🔄 Auto-update metadata included for all supported platforms', 'cyan');
+}
+
+async function performRetryRelease(version, retagCurrentHead) {
+    const tagName = `v${version}`;
+
+    try {
+        if (retagCurrentHead) {
+            log(`\n📝 Re-tagging ${tagName} on current HEAD to retrigger CI...`, 'cyan');
+            execSafe(`git tag -d ${tagName}`);
+            execSafe(`git push ${PRIMARY_GIT_REMOTE} :refs/tags/${tagName}`);
+            exec(`git tag ${tagName}`);
+            exec(`git push ${PRIMARY_GIT_REMOTE} ${tagName}`);
+            log(`✅ Tag ${tagName} moved to current commit and pushed`, 'green');
+        } else {
+            log(`\n📝 Using existing tag ${tagName} (waiting for latest CI run)...`, 'cyan');
+        }
+
+        await finishReleaseFromCi(version);
+    } catch (error) {
+        log(`\n❌ Retry release failed: ${error.message}`, 'red');
+        process.exit(1);
+    }
+}
+
+async function main() {
     log('\n🚀 Release Helper for Test Automation Screen Auto\n', 'cyan');
 
     const versionType = process.argv[2];
-    if (!versionType || !['patch', 'minor', 'major'].includes(versionType)) {
-        log('Usage: node release.js [patch|minor|major]', 'yellow');
+    if (!versionType || !['patch', 'minor', 'major', 'retry'].includes(versionType)) {
+        log('Usage:', 'yellow');
+        log('  node release.js patch|minor|major  → bump version + release', 'yellow');
+        log('  node release.js retry              → publish current version again (no bump)', 'yellow');
         process.exit(1);
     }
 
@@ -213,6 +294,31 @@ function main() {
     if (!ghCheck.success) {
         log('❌ GitHub CLI is not authenticated. Run: gh auth login', 'red');
         process.exit(1);
+    }
+
+    if (versionType === 'retry') {
+        const pkg = getPackageJson();
+        const version = pkg.version;
+        const tagName = `v${version}`;
+
+        log(`📦 Retry release for current version: ${version}`, 'blue');
+        log('   Không tăng version — chỉ đợi CI và publish lại', 'cyan');
+
+        const shouldRetag = await promptYesNo(
+            `\n❓ Re-tag ${tagName} on current HEAD (sau khi fix CI) và chạy lại build? (y/n) `
+        );
+        if (!shouldRetag) {
+            const continueAnyway = await promptYesNo(
+                '   Dùng CI run hiện có của tag (có thể vẫn lỗi). Tiếp tục? (y/n) '
+            );
+            if (!continueAnyway) {
+                log('\n❌ Retry cancelled', 'red');
+                process.exit(0);
+            }
+        }
+
+        await performRetryRelease(version, shouldRetag);
+        return;
     }
 
     const pkg = getPackageJson();
@@ -224,22 +330,28 @@ function main() {
     log(`📦 New version: ${newVersion}`, 'green');
     log('🧱 Platforms: Windows + Linux + macOS (via GitHub Actions)', 'cyan');
 
-    const readline = require('readline').createInterface({
-        input: process.stdin,
-        output: process.stdout,
-    });
-
-    readline.question(`\n❓ Continue with release ${tagName}? (y/n) `, (answer) => {
-        readline.close();
-        if (answer.toLowerCase() !== 'y') {
-            log('\n❌ Release cancelled', 'red');
+    if (!hasGitHubRelease(oldVersion)) {
+        log(`\n⚠️  v${oldVersion} chưa có GitHub Release (CI có thể đã fail).`, 'yellow');
+        log('   Nên dùng: npm run release:retry  — đừng chạy patch thêm lần nữa.', 'yellow');
+        const continueBump = await promptYesNo(`\n❓ Vẫn tăng lên ${tagName}? (y/n) `);
+        if (!continueBump) {
+            log('\n❌ Release cancelled — hãy fix CI rồi chạy: npm run release:retry', 'red');
             process.exit(0);
         }
-        performRelease(pkg, oldVersion, newVersion);
+    }
+
+    const shouldContinue = await promptYesNo(`\n❓ Continue with release ${tagName}? (y/n) `);
+    if (!shouldContinue) {
+        log('\n❌ Release cancelled', 'red');
+        process.exit(0);
+    }
+    performRelease(pkg, oldVersion, newVersion).catch((error) => {
+        log(`\n❌ Release failed: ${error.message}`, 'red');
+        process.exit(1);
     });
 }
 
-function performRelease(pkg, oldVersion, newVersion) {
+async function performRelease(pkg, oldVersion, newVersion) {
     const tagName = `v${newVersion}`;
 
     try {
@@ -261,52 +373,8 @@ function performRelease(pkg, oldVersion, newVersion) {
         exec(`git push ${PRIMARY_GIT_REMOTE} ${tagName}`);
         log('✅ Pushed main + tag (triggers multi-platform CI build)', 'green');
 
-        const runId = waitForWorkflowRun(tagName);
-
-        log('\n📝 Step 4: Downloading built artifacts...', 'cyan');
-        const downloadDir = downloadReleaseArtifacts(runId, newVersion);
-        const releaseFiles = collectReleaseFiles(downloadDir);
-
-        if (!releaseFiles.length) {
-            log('❌ No release files downloaded from CI', 'red');
-            process.exit(1);
-        }
-
-        validateReleaseFiles(releaseFiles, newVersion);
-
-        log('\n📝 Step 5: Release Notes', 'cyan');
-        log('Enter release notes (or press Enter for default):', 'yellow');
-
-        const readline = require('readline').createInterface({
-            input: process.stdin,
-            output: process.stdout,
-        });
-
-        readline.question('', (notes) => {
-            readline.close();
-
-            const releaseNotes = notes || [
-                `Release ${tagName}`,
-                '',
-                '### Downloads',
-                '- Windows: Setup + Portable (.exe)',
-                '- Linux: AppImage',
-                '- macOS: DMG',
-                '- Browser Extension: extension.zip',
-                '',
-                '### Auto-update',
-                '- Windows: latest.yml',
-                '- Linux: latest-linux.yml',
-                '- macOS: latest-mac.yml',
-            ].join('\n');
-
-            log('\n📝 Step 6: Publishing GitHub Releases (both repositories)...', 'cyan');
-            createGitHubReleases(newVersion, releaseFiles, releaseNotes);
-
-            log('\n🎉 Release completed successfully!', 'green');
-            log(`📦 Users on Windows/Linux/macOS can install v${newVersion}`, 'cyan');
-            log('🔄 Auto-update metadata included for all supported platforms', 'cyan');
-        });
+        log('\n📝 Step 4: Waiting for CI and publishing release...', 'cyan');
+        await finishReleaseFromCi(newVersion);
     } catch (error) {
         log(`\n❌ Release failed: ${error.message}`, 'red');
         log('Rolling back local version/tag changes...', 'yellow');
@@ -317,8 +385,11 @@ function performRelease(pkg, oldVersion, newVersion) {
         execSafe(`git tag -d ${tagName}`);
 
         log('✅ Rolled back to previous local state', 'green');
-        process.exit(1);
+        throw error;
     }
 }
 
-main();
+main().catch((error) => {
+    log(`\n❌ Release script failed: ${error.message}`, 'red');
+    process.exit(1);
+});
