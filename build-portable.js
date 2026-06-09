@@ -25,6 +25,8 @@ function exec(command) {
     }
 }
 
+const { buildExtensionZip } = require('./build-extension');
+
 async function createZip(sourceDir, outputPath) {
     return new Promise((resolve, reject) => {
         const output = fs.createWriteStream(outputPath);
@@ -45,52 +47,8 @@ async function createZip(sourceDir, outputPath) {
 
 async function buildExtension() {
     log('\n📦 Building Browser Extension...', '\x1b[36m');
-    
-    const extensionSrc = path.join(__dirname, 'browser_extension');
-    const extensionDist = path.join(__dirname, 'extension-dist');
-    const distDir = path.join(__dirname, 'dist');
-    
-    // Check if browser_extension folder exists
-    if (!fs.existsSync(extensionSrc)) {
-        log('  ⚠️  browser_extension folder not found, skipping...', '\x1b[33m');
-        return;
-    }
-    
-    // Ensure dist directory exists
-    if (!fs.existsSync(distDir)) {
-        fs.mkdirSync(distDir, { recursive: true });
-    }
-    
-    // Copy extension files to extension-dist (if needed)
-    if (!fs.existsSync(extensionDist)) {
-        fs.mkdirSync(extensionDist, { recursive: true });
-    }
-    
-    // Copy all extension files
-    const filesToCopy = ['background.js', 'content.js', 'popup.js', 'popup.html', 'manifest.json'];
-    let copiedCount = 0;
-    filesToCopy.forEach(file => {
-        const src = path.join(extensionSrc, file);
-        const dst = path.join(extensionDist, file);
-        if (fs.existsSync(src)) {
-            fs.copyFileSync(src, dst);
-            log(`  ✅ Copied ${file}`, '\x1b[32m');
-            copiedCount++;
-        } else {
-            log(`  ⚠️  File not found: ${file}`, '\x1b[33m');
-        }
-    });
-    
-    if (copiedCount === 0) {
-        log('  ⚠️  No extension files found, skipping zip creation...', '\x1b[33m');
-        return;
-    }
-    
-    // Create extension.zip
     try {
-    const extensionZip = path.join(distDir, 'extension.zip');
-    await createZip(extensionDist, extensionZip);
-    log('✅ Extension zip created: extension.zip', '\x1b[32m');
+        await buildExtensionZip(path.join(__dirname, 'dist'));
     } catch (error) {
         log(`  ⚠️  Failed to create extension zip: ${error.message}`, '\x1b[33m');
     }

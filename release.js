@@ -2,8 +2,8 @@
 
 /**
  * Release Helper Script
- * Automates the release process for the app
- * 
+ * Builds Windows, Linux, macOS via GitHub Actions and publishes to both repos.
+ *
  * Usage:
  *   node release.js patch   (1.0.0 → 1.0.1)
  *   node release.js minor   (1.0.0 → 1.1.0)
@@ -14,7 +14,6 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-// Colors for console
 const colors = {
     reset: '\x1b[0m',
     bright: '\x1b[1m',
@@ -27,8 +26,11 @@ const colors = {
 
 const RELEASE_REPOS = [
     'Nguyenkiettuan1/electron_desktop_app',
-    'phanlaw/electron_desktop_app'
+    'phanlaw/electron_desktop_app',
 ];
+
+const WORKFLOW_NAME = 'Build and Release';
+const PRIMARY_REPO = RELEASE_REPOS[0];
 
 function log(message, color = 'reset') {
     console.log(`${colors[color]}${message}${colors.reset}`);
@@ -36,22 +38,20 @@ function log(message, color = 'reset') {
 
 function exec(command, silent = false) {
     try {
-        const output = execSync(command, { encoding: 'utf8' });
-        if (!silent) console.log(output);
-        return output.trim();
+        const output = execSync(command, { encoding: 'utf8', stdio: silent ? 'pipe' : 'inherit' });
+        return (output || '').trim();
     } catch (error) {
         log(`❌ Error: ${error.message}`, 'red');
         process.exit(1);
     }
 }
 
-function execSafe(command, silent = false) {
+function execSafe(command) {
     try {
-        const output = execSync(command, { encoding: 'utf8' });
-        if (!silent) console.log(output);
+        const output = execSync(command, { encoding: 'utf8', stdio: 'pipe' });
         return { success: true, output: output.trim() };
     } catch (error) {
-        return { success: false, error: error.message };
+        return { success: false, error: error.message, output: (error.stdout || '').trim() };
     }
 }
 
@@ -67,7 +67,7 @@ function savePackageJson(pkg) {
 
 function incrementVersion(version, type) {
     const parts = version.split('.').map(Number);
-    
+
     switch (type) {
         case 'patch':
             parts[2]++;
@@ -84,184 +84,244 @@ function incrementVersion(version, type) {
         default:
             throw new Error('Invalid version type. Use: patch, minor, or major');
     }
-    
+
     return parts.join('.');
+}
+
+function sleepMs(ms) {
+    execSync(`powershell -Command "Start-Sleep -Seconds ${Math.ceil(ms / 1000)}"`, { stdio: 'ignore' });
+}
+
+function waitForWorkflowRun(tagName) {
+    log(`\n⏳ Waiting for GitHub Actions (${WORKFLOW_NAME}) for ${tagName}...`, 'cyan');
+    log('This builds Windows, Linux, and macOS. It may take 10-20 minutes.', 'yellow');
+
+    let runId = null;
+    const maxAttempts = 90;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const listResult = execSafe(
+            `gh run list --repo "${PRIMARY_REPO}" --workflow "${WORKFLOW_NAME}" --limit 20 --json databaseId,headBranch,status,conclusion`
+        );
+
+        if (listResult.success) {
+            const runs = JSON.parse(listResult.output || '[]');
+            const matched = runs.find((run) => run.headBranch === tagName);
+            if (matched?.databaseId) {
+                runId = matched.databaseId;
+                break;
+            }
+        }
+
+        sleepMs(10000);
+    }
+
+    if (!runId) {
+        log('❌ Timed out waiting for GitHub Actions workflow to start', 'red');
+        process.exit(1);
+    }
+
+    exec(`gh run watch ${runId} --repo "${PRIMARY_REPO}" --exit-status`, true);
+    log(`✅ Workflow completed: run ${runId}`, 'green');
+    return runId;
+}
+
+function downloadReleaseArtifacts(runId, version) {
+    const downloadDir = path.join(__dirname, 'release-download', `v${version}`);
+    if (fs.existsSync(downloadDir)) {
+        fs.rmSync(downloadDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(downloadDir, { recursive: true });
+
+    exec(`gh run download ${runId} --repo "${PRIMARY_REPO}" -n release-dist -D "${downloadDir}"`);
+    return downloadDir;
+}
+
+function collectReleaseFiles(downloadDir) {
+    if (!fs.existsSync(downloadDir)) {
+        return [];
+    }
+
+    return fs.readdirSync(downloadDir)
+        .map((name) => path.join(downloadDir, name))
+        .filter((filePath) => fs.statSync(filePath).isFile());
+}
+
+function validateReleaseFiles(files, version) {
+    const names = files.map((f) => path.basename(f));
+    const requiredPatterns = [
+        /^extension\.zip$/i,
+        /\.exe$/i,
+        /\.AppImage$/i,
+        /\.dmg$/i,
+        /^latest\.yml$/i,
+        /^latest-linux\.yml$/i,
+        /^latest-mac\.yml$/i,
+    ];
+
+    log('\n📝 Validating release files...', 'cyan');
+    files.forEach((filePath) => {
+        const sizeMB = (fs.statSync(filePath).size / 1024 / 1024).toFixed(2);
+        log(`  ✅ ${path.basename(filePath)} (${sizeMB} MB)`, 'green');
+    });
+
+    const missing = requiredPatterns.filter((pattern) => !names.some((name) => pattern.test(name)));
+    if (missing.some((pattern) => pattern.source === '^extension\\.zip$')) {
+        log('\n❌ extension.zip is required but missing from CI artifacts.', 'red');
+        process.exit(1);
+    }
+
+    if (missing.length) {
+        log(`\n⚠️  Some expected auto-update artifacts are missing for v${version}.`, 'yellow');
+        log('   Release will continue with available files.', 'yellow');
+    }
+}
+
+function createGitHubReleases(version, files, releaseNotes) {
+    const tagName = `v${version}`;
+    const escapedNotes = releaseNotes.replace(/"/g, '\\"');
+    const fileArgs = files.map((filePath) => `"${filePath}"`).join(' ');
+
+    for (const repo of RELEASE_REPOS) {
+        const existing = execSafe(`gh release view ${tagName} --repo "${repo}"`);
+        if (existing.success) {
+            log(`♻️  Deleting existing release ${tagName} on ${repo} before re-upload...`, 'yellow');
+            execSafe(`gh release delete ${tagName} --repo "${repo}" --yes`);
+        }
+
+        const releaseCmd = `gh release create ${tagName} ${fileArgs} ` +
+            `--repo "${repo}" ` +
+            `--title "Version ${version}" ` +
+            `--notes "${escapedNotes}"`;
+        exec(releaseCmd);
+        log(`✅ GitHub Release published on ${repo}`, 'green');
+        log(`🔗 https://github.com/${repo}/releases/tag/${tagName}`, 'blue');
+    }
 }
 
 function main() {
     log('\n🚀 Release Helper for Test Automation Screen Auto\n', 'cyan');
-    
-    // Get version increment type
+
     const versionType = process.argv[2];
-    
     if (!versionType || !['patch', 'minor', 'major'].includes(versionType)) {
         log('Usage: node release.js [patch|minor|major]', 'yellow');
-        log('  patch: 1.0.0 → 1.0.1 (bug fixes)', 'yellow');
-        log('  minor: 1.0.0 → 1.1.0 (new features)', 'yellow');
-        log('  major: 1.0.0 → 2.0.0 (breaking changes)', 'yellow');
         process.exit(1);
     }
-    
-    // Read package.json
+
+    const ghCheck = execSafe('gh auth status');
+    if (!ghCheck.success) {
+        log('❌ GitHub CLI is not authenticated. Run: gh auth login', 'red');
+        process.exit(1);
+    }
+
     const pkg = getPackageJson();
     const oldVersion = pkg.version;
     const newVersion = incrementVersion(oldVersion, versionType);
-    
+    const tagName = `v${newVersion}`;
+
     log(`📦 Current version: ${oldVersion}`, 'blue');
     log(`📦 New version: ${newVersion}`, 'green');
-    
-    // Confirm
-    console.log(`\n❓ Continue with release v${newVersion}? (y/n)`);
+    log('🧱 Platforms: Windows + Linux + macOS (via GitHub Actions)', 'cyan');
+
     const readline = require('readline').createInterface({
         input: process.stdin,
-        output: process.stdout
+        output: process.stdout,
     });
-    
-    readline.question('', (answer) => {
+
+    readline.question(`\n❓ Continue with release ${tagName}? (y/n) `, (answer) => {
         readline.close();
-        
         if (answer.toLowerCase() !== 'y') {
             log('\n❌ Release cancelled', 'red');
             process.exit(0);
         }
-        
         performRelease(pkg, oldVersion, newVersion);
     });
 }
 
 function performRelease(pkg, oldVersion, newVersion) {
+    const tagName = `v${newVersion}`;
+
     try {
-        // Step 1: Update version in package.json
         log('\n📝 Step 1: Updating package.json...', 'cyan');
         pkg.version = newVersion;
         savePackageJson(pkg);
         log(`✅ Version updated: ${oldVersion} → ${newVersion}`, 'green');
-        
-        // Step 2: Git commit and tag
+
         log('\n📝 Step 2: Creating git commit and tag...', 'cyan');
         exec('git add package.json');
-        // Some environments have git hooks that can return non-zero even after the commit is created.
-        // Release commits should be deterministic; skip hooks for this automated step.
-        exec(`git commit --no-verify -m "Release v${newVersion}"`);
-        exec(`git tag v${newVersion}`);
-        log(`✅ Git commit and tag created: v${newVersion}`, 'green');
-        
-        // Step 3: Push to GitHub
+        exec(`git commit --no-verify -m "Release ${tagName}"`);
+        exec(`git tag ${tagName}`);
+        log(`✅ Git commit and tag created: ${tagName}`, 'green');
+
         log('\n📝 Step 3: Pushing to GitHub...', 'cyan');
         exec('git push origin main');
-        exec('git push origin --tags');
+        exec(`git push origin ${tagName}`);
 
-        const hasPhanlawRemote = execSafe('git remote get-url phanlaw', true).success;
+        const hasPhanlawRemote = execSafe('git remote get-url phanlaw').success;
         if (hasPhanlawRemote) {
             exec('git push phanlaw main');
-            exec('git push phanlaw --tags');
-            log('✅ Pushed to phanlaw remote', 'green');
+            log('✅ Pushed main branch to phanlaw remote', 'green');
         }
-        log('✅ Pushed to GitHub', 'green');
-        
-        // Step 4: Build app
-        log('\n📝 Step 4: Building app...', 'cyan');
-        log('⏳ This may take a few minutes...', 'yellow');
-        exec('npm run build-win');
-        log('✅ App built successfully', 'green');
-        
-        // Step 5: Check files
-        log('\n📝 Step 5: Checking build files...', 'cyan');
-        const distDir = path.join(__dirname, 'dist');
-        // Match actual file names from electron-builder (with dashes, no spaces)
-        const exeFile = `Test-Automation-Screen-Auto-Setup-${newVersion}.exe`;
-        const blockmapFile = `${exeFile}.blockmap`;
-        const ymlFile = 'latest.yml';
-        
-        const files = [exeFile, blockmapFile, ymlFile];
-        let allFilesExist = true;
-        
-        files.forEach(file => {
-            const filePath = path.join(distDir, file);
-            if (fs.existsSync(filePath)) {
-                const stats = fs.statSync(filePath);
-                const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
-                log(`  ✅ ${file} (${sizeMB} MB)`, 'green');
-            } else {
-                log(`  ❌ ${file} NOT FOUND!`, 'red');
-                allFilesExist = false;
-            }
-        });
-        
-        if (!allFilesExist) {
-            log('\n❌ Build failed: Missing files', 'red');
+        log('✅ Tag pushed to origin (triggers multi-platform CI build)', 'green');
+
+        const runId = waitForWorkflowRun(tagName);
+
+        log('\n📝 Step 4: Downloading built artifacts...', 'cyan');
+        const downloadDir = downloadReleaseArtifacts(runId, newVersion);
+        const releaseFiles = collectReleaseFiles(downloadDir);
+
+        if (!releaseFiles.length) {
+            log('❌ No release files downloaded from CI', 'red');
             process.exit(1);
         }
-        
-        // Step 6: Prompt for release notes
-        log('\n📝 Step 6: Release Notes', 'cyan');
+
+        validateReleaseFiles(releaseFiles, newVersion);
+
+        log('\n📝 Step 5: Release Notes', 'cyan');
         log('Enter release notes (or press Enter for default):', 'yellow');
-        
+
         const readline = require('readline').createInterface({
             input: process.stdin,
-            output: process.stdout
+            output: process.stdout,
         });
-        
+
         readline.question('', (notes) => {
             readline.close();
-            
-            const releaseNotes = notes || `Release v${newVersion}\n\nBug fixes and improvements.`;
-            
-            // Step 7: Create GitHub Releases (both repositories)
-            log('\n📝 Step 7: Creating GitHub Release...', 'cyan');
-            
-            // Escape file paths with quotes for PowerShell/Windows
-            const exePath = path.join(distDir, exeFile);
-            const blockmapPath = path.join(distDir, blockmapFile);
-            const ymlPath = path.join(distDir, ymlFile);
-            
-            try {
-                const escapedNotes = releaseNotes.replace(/"/g, '\\"');
-                for (const repo of RELEASE_REPOS) {
-                    const releaseCmd = `gh release create v${newVersion} ` +
-                        `"${exePath}" ` +
-                        `"${blockmapPath}" ` +
-                        `"${ymlPath}" ` +
-                        `--repo "${repo}" ` +
-                        `--title "Version ${newVersion}" ` +
-                        `--notes "${escapedNotes}"`;
-                    exec(releaseCmd);
-                    log(`✅ GitHub Release created on ${repo}: v${newVersion}`, 'green');
-                    log(`🔗 https://github.com/${repo}/releases/tag/v${newVersion}`, 'blue');
-                }
-                
-                log('\n🎉 Release completed successfully!', 'green');
-                log(`\n📦 Users can now download v${newVersion}`, 'cyan');
-                log(`🔄 Existing users will be notified to update automatically`, 'cyan');
-                
-            } catch (error) {
-                log('\n❌ Failed to create GitHub Release', 'red');
-                log('You can create it manually:', 'yellow');
-                RELEASE_REPOS.forEach((repo, index) => {
-                    log(`  ${index + 1}. Go to: https://github.com/${repo}/releases/new`, 'yellow');
-                    log(`     Tag: v${newVersion}`, 'yellow');
-                    log(`     Upload files from dist/ folder`, 'yellow');
-                });
-            }
+
+            const releaseNotes = notes || [
+                `Release ${tagName}`,
+                '',
+                '### Downloads',
+                '- Windows: Setup + Portable (.exe)',
+                '- Linux: AppImage',
+                '- macOS: DMG',
+                '- Browser Extension: extension.zip',
+                '',
+                '### Auto-update',
+                '- Windows: latest.yml',
+                '- Linux: latest-linux.yml',
+                '- macOS: latest-mac.yml',
+            ].join('\n');
+
+            log('\n📝 Step 6: Publishing GitHub Releases (both repositories)...', 'cyan');
+            createGitHubReleases(newVersion, releaseFiles, releaseNotes);
+
+            log('\n🎉 Release completed successfully!', 'green');
+            log(`📦 Users on Windows/Linux/macOS can install v${newVersion}`, 'cyan');
+            log('🔄 Auto-update metadata included for all supported platforms', 'cyan');
         });
-        
     } catch (error) {
         log(`\n❌ Release failed: ${error.message}`, 'red');
-        log('Rolling back changes...', 'yellow');
-        
-        // Rollback version
+        log('Rolling back local version/tag changes...', 'yellow');
+
         pkg.version = oldVersion;
         savePackageJson(pkg);
-        
-        // Rollback git
-        exec('git reset --hard HEAD~1', true);
-        exec(`git tag -d v${newVersion}`, true);
-        
-        log('✅ Rolled back to previous state', 'green');
+        execSafe('git reset --hard HEAD~1');
+        execSafe(`git tag -d ${tagName}`);
+
+        log('✅ Rolled back to previous local state', 'green');
         process.exit(1);
     }
 }
 
-// Run
 main();
-

@@ -786,18 +786,6 @@ class UiService {
                     window.dispatchEvent(new CustomEvent('detected-link-updated'));
                 }
                 console.log('📁 Original file preserved:', filePath);
-                
-                // Auto-minimize logic:
-                if (!this.wasVisibleBeforeScreenshot) {
-                    const { ipcRenderer } = require('electron');
-                    ipcRenderer.invoke('minimize-to-tray').then(result => {
-                        if (result && result.minimized) {
-                            console.log('🔽 App minimized back to tray after upload (triggered from tray)');
-                        }
-                    });
-                } else {
-                    console.log('⏭️ Window was visible before, keeping it visible');
-                }
             } else {
                 // Error - update queue item and show error popup
                 queueItem.status = 'error';

@@ -2932,18 +2932,18 @@ class TestAutomationDesktopApp {
             this.showNotification('📤 Upload added to queue! Processing in background...', 'success');
             this.hideScreenshotPreview();
             this.clearForm();
-            this.hideAppToBackground();
+            this.returnToTrayIfStartedFromTray();
         }
     }
 
-
-    hideAppToBackground() {
-        // Hide main window to background
-        ipcRenderer.invoke('minimize-window');
-        
-        // Clear form for next screenshot
-        this.clearForm();
-        this.hideScreenshotPreview();
+    returnToTrayIfStartedFromTray() {
+        if (!this.uiService.wasVisibleBeforeScreenshot) {
+            ipcRenderer.invoke('minimize-to-tray').then((result) => {
+                if (result?.minimized) {
+                    console.log('🔽 Returned to tray immediately after upload');
+                }
+            });
+        }
     }
 
     showSuccessNotification(message) {
@@ -3489,6 +3489,7 @@ class TestAutomationDesktopApp {
             this.hideScreenshotPreview();
             this.clearForm();
             this.hideScreenshotPopup();
+            this.returnToTrayIfStartedFromTray();
         }
     }
 
