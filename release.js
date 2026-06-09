@@ -93,38 +93,74 @@ function sleepMs(ms) {
     execSync(`powershell -Command "Start-Sleep -Seconds ${Math.ceil(ms / 1000)}"`, { stdio: 'ignore' });
 }
 
-function waitForWorkflowRun(tagName) {
+function listWorkflowRuns() {
+    const listResult = execSafe(
+        `gh run list --repo "${PRIMARY_REPO}" --workflow "${WORKFLOW_NAME}" --limit 30 --json databaseId,headBranch,status,conclusion,createdAt`
+    );
+    if (!listResult.success) {
+        return [];
+    }
+    return JSON.parse(listResult.output || '[]');
+}
+
+function findWorkflowRun(tagName, { minCreatedAtMs = null } = {}) {
+    const runs = listWorkflowRuns().filter((run) => run.headBranch === tagName);
+    if (!runs.length) {
+        return null;
+    }
+
+    if (minCreatedAtMs) {
+        const freshRuns = runs.filter((run) => {
+            const createdAtMs = new Date(run.createdAt).getTime();
+            return createdAtMs >= minCreatedAtMs - 3000;
+        });
+        if (!freshRuns.length) {
+            return null;
+        }
+        return freshRuns[0];
+    }
+
+    return runs[0];
+}
+
+function waitForWorkflowRun(tagName, { minCreatedAtMs = null } = {}) {
     log(`\n⏳ Waiting for GitHub Actions (${WORKFLOW_NAME}) for ${tagName}...`, 'cyan');
     log('This builds Windows, Linux, and macOS. It may take 10-20 minutes.', 'yellow');
 
-    let runId = null;
+    let run = null;
     const maxAttempts = 90;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        const listResult = execSafe(
-            `gh run list --repo "${PRIMARY_REPO}" --workflow "${WORKFLOW_NAME}" --limit 20 --json databaseId,headBranch,status,conclusion`
-        );
-
-        if (listResult.success) {
-            const runs = JSON.parse(listResult.output || '[]');
-            const matched = runs.find((run) => run.headBranch === tagName);
-            if (matched?.databaseId) {
-                runId = matched.databaseId;
-                break;
-            }
+        run = findWorkflowRun(tagName, { minCreatedAtMs });
+        if (run?.databaseId) {
+            log(`   Found workflow run #${run.databaseId} (status: ${run.status})`, 'blue');
+            break;
         }
 
+        if (minCreatedAtMs) {
+            log('   Waiting for a new workflow run to appear...', 'yellow');
+        }
         sleepMs(10000);
     }
 
-    if (!runId) {
+    if (!run?.databaseId) {
         log('❌ Timed out waiting for GitHub Actions workflow to start', 'red');
         process.exit(1);
     }
 
-    exec(`gh run watch ${runId} --repo "${PRIMARY_REPO}" --exit-status`, true);
-    log(`✅ Workflow completed: run ${runId}`, 'green');
-    return runId;
+    if (run.status === 'completed') {
+        if (run.conclusion !== 'success') {
+            log(`❌ Workflow run #${run.databaseId} already failed (${run.conclusion})`, 'red');
+            log(`   Check: https://github.com/${PRIMARY_REPO}/actions/runs/${run.databaseId}`, 'yellow');
+            process.exit(1);
+        }
+        log(`✅ Workflow already completed successfully: run ${run.databaseId}`, 'green');
+        return run.databaseId;
+    }
+
+    exec(`gh run watch ${run.databaseId} --repo "${PRIMARY_REPO}" --exit-status`, true);
+    log(`✅ Workflow completed: run ${run.databaseId}`, 'green');
+    return run.databaseId;
 }
 
 function downloadReleaseArtifacts(runId, version) {
@@ -219,9 +255,9 @@ function promptYesNo(question) {
     });
 }
 
-async function finishReleaseFromCi(version, releaseNotes = null) {
+async function finishReleaseFromCi(version, releaseNotes = null, waitOptions = {}) {
     const tagName = `v${version}`;
-    const runId = waitForWorkflowRun(tagName);
+    const runId = waitForWorkflowRun(tagName, waitOptions);
 
     log('\n📝 Downloading built artifacts...', 'cyan');
     const downloadDir = downloadReleaseArtifacts(runId, version);
@@ -259,20 +295,23 @@ async function finishReleaseFromCi(version, releaseNotes = null) {
 
 async function performRetryRelease(version, retagCurrentHead) {
     const tagName = `v${version}`;
+    let waitOptions = {};
 
     try {
         if (retagCurrentHead) {
+            const retagStartedAtMs = Date.now();
             log(`\n📝 Re-tagging ${tagName} on current HEAD to retrigger CI...`, 'cyan');
             execSafe(`git tag -d ${tagName}`);
             execSafe(`git push ${PRIMARY_GIT_REMOTE} :refs/tags/${tagName}`);
             exec(`git tag ${tagName}`);
             exec(`git push ${PRIMARY_GIT_REMOTE} ${tagName}`);
             log(`✅ Tag ${tagName} moved to current commit and pushed`, 'green');
+            waitOptions = { minCreatedAtMs: retagStartedAtMs };
         } else {
             log(`\n📝 Using existing tag ${tagName} (waiting for latest CI run)...`, 'cyan');
         }
 
-        await finishReleaseFromCi(version);
+        await finishReleaseFromCi(version, null, waitOptions);
     } catch (error) {
         log(`\n❌ Retry release failed: ${error.message}`, 'red');
         process.exit(1);
@@ -369,12 +408,13 @@ async function performRelease(pkg, oldVersion, newVersion) {
         log('\n📝 Step 3: Pushing to GitHub (primary repo only)...', 'cyan');
         log(`   Git remote: ${PRIMARY_GIT_REMOTE}`, 'blue');
         log('   phanlaw repo will receive release files only (not git push)', 'blue');
+        const pushStartedAtMs = Date.now();
         exec(`git push ${PRIMARY_GIT_REMOTE} main`);
         exec(`git push ${PRIMARY_GIT_REMOTE} ${tagName}`);
         log('✅ Pushed main + tag (triggers multi-platform CI build)', 'green');
 
         log('\n📝 Step 4: Waiting for CI and publishing release...', 'cyan');
-        await finishReleaseFromCi(newVersion);
+        await finishReleaseFromCi(newVersion, null, { minCreatedAtMs: pushStartedAtMs });
     } catch (error) {
         log(`\n❌ Release failed: ${error.message}`, 'red');
         log('Rolling back local version/tag changes...', 'yellow');
