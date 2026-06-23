@@ -241,13 +241,33 @@ class UiService {
         statusElement.className = `step-status ${status === 'active' ? 'active' : 'ready'}`;
     }
 
+    setScreenshotImageSrc(imageEl, filePath, cacheKey) {
+        if (!imageEl || !filePath) {
+            return;
+        }
+
+        // Same filename can be reused (YYYYMMDD_session_domain.png) — bust cache
+        imageEl.removeAttribute('src');
+
+        const normalizedPath = String(filePath).replace(/\\/g, '/');
+        const fileUrl = normalizedPath.startsWith('/')
+            ? `file://${normalizedPath}`
+            : `file:///${normalizedPath}`;
+        const bust = cacheKey != null ? String(cacheKey) : String(Date.now());
+
+        imageEl.src = `${fileUrl}?t=${encodeURIComponent(bust)}`;
+    }
+
     showScreenshotPreview(screenshotData) {
         const preview = document.getElementById('screenshot-preview');
         const image = document.getElementById('screenshot-image');
         
         if (screenshotData && screenshotData.path) {
-            // Load image from local file path
-            image.src = `file://${screenshotData.path}`;
+            this.setScreenshotImageSrc(
+                image,
+                screenshotData.path,
+                screenshotData.timestamp || Date.now()
+            );
             preview.classList.remove('hidden');
         }
     }
@@ -271,9 +291,9 @@ class UiService {
         urlEl.textContent = mainPageUrl || 'No URL detected';
         timeEl.textContent = new Date(data.timestamp).toLocaleString();
         
-        // Load screenshot image
+        // Load screenshot image (cache-bust when filename/path is reused)
         if (data.path) {
-            imageEl.src = `file://${data.path}`;
+            this.setScreenshotImageSrc(imageEl, data.path, data.timestamp || Date.now());
         }
 
         // Clear popup signal input and search
